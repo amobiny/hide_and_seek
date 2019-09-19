@@ -54,10 +54,10 @@ class CheXpertDataSet(Dataset):
 
         if data_len is not None:
             self.image_names = image_names[:data_len]
-            self.labels = np.array(labels)[:, -1][:data_len]
+            self.labels = np.array(labels)[:, 3][:data_len]
         else:
             self.image_names = image_names
-            self.labels = np.array(labels)[:, -1]   # Opacity
+            self.labels = np.array(labels)[:, 3]   # Opacity
 
     def __getitem__(self, index):
         """Take the index of item and returns the image and its labels"""

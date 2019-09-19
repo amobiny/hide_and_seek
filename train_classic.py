@@ -6,7 +6,6 @@ import os
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
 import time
-import logging
 import warnings
 import numpy as np
 import torch
@@ -78,7 +77,7 @@ def train(**kwargs):
 
         # loss
         batch_loss = loss(y_pred, y)
-        epoch_loss[0] += batch_loss.item()
+        epoch_loss += batch_loss.item()
 
         # backward
         optimizer.zero_grad()
@@ -88,15 +87,6 @@ def train(**kwargs):
         # metrics: top-1, top-3, top-5 error
         with torch.no_grad():
             epoch_acc += accuracy(y_pred, y, topk=TOP_K)
-
-        # loss
-        batch_loss = loss(y_pred, y)
-        epoch_loss += batch_loss.item()
-
-        # backward
-        optimizer.zero_grad()
-        batch_loss.backward()
-        optimizer.step()
 
         # end of this batch
         batches += 1
@@ -112,7 +102,7 @@ def train(**kwargs):
                 log_string(
                     '\tBatch %d: Loss %.4f, Accuracy: %.2f, Time %3.2f' %
                     (i + 1,
-                     epoch_loss[0] / batches, epoch_acc,
+                     epoch_loss[0] / batches, epoch_acc / batches,
                      batch_end - batch_start))
 
     # save checkpoint model
@@ -124,8 +114,7 @@ def train(**kwargs):
         torch.save({
             'epoch': epoch,
             'save_dir': model_dir,
-            'state_dict': state_dict,
-            'feature_center': feature_center.cpu()},
+            'state_dict': state_dict},
             os.path.join(model_dir, '%03d.ckpt' % (epoch + 1)))
 
     # end of this epoch
@@ -156,15 +145,10 @@ def validate(**kwargs):
     verbose = kwargs['verbose']
     log_string('--'*25)
     log_string('Running Validation ... ')
-    # Default Parameters
-    theta_c = 0.5
-    crop_size = (256, 256)  # size of cropped images for 'See Better'
 
     # metrics initialization
     batches = 0
-    raw_loss, crop_loss, epoch_loss = 0, 0, 0
-    raw_acc = np.array([0]*len(TOP_K), dtype='float')  # top - 1, 3, 5
-    crop_acc = np.array([0]*len(TOP_K), dtype='float')  # top - 1, 3, 5
+    epoch_loss = 0
     epoch_acc = np.array([0]*len(TOP_K), dtype='float')  # top - 1, 3, 5
 
     # begin validation
@@ -234,10 +218,11 @@ if __name__ == '__main__':
     start_epoch = 0
 
     net = inception_v3(pretrained=True)
+    net.aux_logits = False
     # Replace the top layer for finetuning.
     net.fc = nn.Linear(net.fc.in_features, options.num_classes)
 
-    if options.ckpt:
+    if options.load_model:
         ckpt = options.ckpt
 
         if options.initial_training == 0:
@@ -251,12 +236,12 @@ if __name__ == '__main__':
 
         # Load weights
         net.load_state_dict(state_dict)
-        logging.info('Network loaded from {}'.format(options.ckpt))
+        log_string('Network loaded from {}'.format(options.ckpt))
 
         # load feature center
         if 'feature_center' in checkpoint:
             feature_center = checkpoint['feature_center'].to(torch.device("cuda"))
-            logging.info('feature_center loaded from {}'.format(options.ckpt))
+            log_string('feature_center loaded from {}'.format(options.ckpt))
 
     ##################################
     # Initialize saving directory
@@ -278,6 +263,8 @@ if __name__ == '__main__':
     os.system('cp {}/models/wsdan.py {}'.format(BASE_DIR, save_dir))
     # bkp of train procedure
     os.system('cp {}/train_wsdan.py {}'.format(BASE_DIR, save_dir))
+    if options.data_name == 'cheXpert':
+        os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
 
     ##################################
     # Use cuda

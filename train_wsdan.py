@@ -6,7 +6,6 @@ import os
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
 import time
-import logging
 import warnings
 import numpy as np
 import torch
@@ -250,7 +249,6 @@ def validate(**kwargs):
     net.eval()
     with torch.no_grad():
         for i, (X, y) in enumerate(data_loader):
-            batch_start = time.time()
 
             # obtain data
             X = X.to(torch.device("cuda"))
@@ -294,7 +292,6 @@ def validate(**kwargs):
 
             # end of this batch
             batches += 1
-            batch_end = time.time()
             # if (i + 1) % verbose == 0:
             #     if len(TOP_K) > 1:
             #         log_string('\tBatch %d: Loss %.5f, Accuracy: Top-1 %.2f, Top-3 %.2f, Top-5 %.2f, Time %3.2f' %
@@ -359,8 +356,8 @@ if __name__ == '__main__':
     # feature_center: size of (#classes, #attention_maps, #channel_features)
     feature_center = torch.zeros(num_classes, num_attentions, net.num_features * net.expansion).to(torch.device("cuda"))
 
-    if options.ckpt:
-        ckpt = options.ckpt
+    if options.load_model:
+        ckpt = options.load_model_path
 
         if options.initial_training == 0:
             # Get Name (epoch)
@@ -373,12 +370,12 @@ if __name__ == '__main__':
 
         # Load weights
         net.load_state_dict(state_dict)
-        logging.info('Network loaded from {}'.format(options.ckpt))
+        log_string('Network loaded from {}'.format(ckpt))
 
         # load feature center
         if 'feature_center' in checkpoint:
             feature_center = checkpoint['feature_center'].to(torch.device("cuda"))
-            logging.info('feature_center loaded from {}'.format(options.ckpt))
+            log_string('feature_center loaded from {}'.format(ckpt))
 
     ##################################
     # Initialize saving directory
@@ -400,6 +397,8 @@ if __name__ == '__main__':
     os.system('cp {}/models/wsdan.py {}'.format(BASE_DIR, save_dir))
     # bkp of train procedure
     os.system('cp {}/train_wsdan.py {}'.format(BASE_DIR, save_dir))
+    if options.data_name == 'cheXpert':
+        os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
 
     ##################################
     # Use cuda

@@ -6,7 +6,6 @@ import os
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
 import time
-import logging
 import warnings
 import numpy as np
 import torch
@@ -359,7 +358,7 @@ if __name__ == '__main__':
     # feature_center: size of (#classes, #attention_maps, #channel_features)
     feature_center = torch.zeros(num_classes, num_attentions, net.num_features * net.expansion).to(torch.device("cuda"))
 
-    if options.ckpt:
+    if options.load_model:
         ckpt = options.ckpt
 
         if options.initial_training == 0:
@@ -373,12 +372,12 @@ if __name__ == '__main__':
 
         # Load weights
         net.load_state_dict(state_dict)
-        logging.info('Network loaded from {}'.format(options.ckpt))
+        log_string('Network loaded from {}'.format(options.ckpt))
 
         # load feature center
         if 'feature_center' in checkpoint:
             feature_center = checkpoint['feature_center'].to(torch.device("cuda"))
-            logging.info('feature_center loaded from {}'.format(options.ckpt))
+            log_string('feature_center loaded from {}'.format(options.ckpt))
 
     ##################################
     # Initialize saving directory
@@ -400,6 +399,8 @@ if __name__ == '__main__':
     os.system('cp {}/models/wsdan.py {}'.format(BASE_DIR, save_dir))
     # bkp of train procedure
     os.system('cp {}/train_wsdan.py {}'.format(BASE_DIR, save_dir))
+    if options.data_name == 'cheXpert':
+        os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
 
     ##################################
     # Use cuda
