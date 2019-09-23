@@ -46,10 +46,11 @@ class BAP(nn.Module):
 
 # WS-DAN: Weakly Supervised Data Augmentation Network for FGVC
 class WSDAN_v2(nn.Module):
-    def __init__(self, num_classes, M=32, net=None):
+    def __init__(self, num_classes, M=32, K=4, net=None):
         super(WSDAN_v2, self).__init__()
         self.num_classes = num_classes
         self.M = M
+        self.K = K  # number of selected attention maps
 
         # Default Network
         self.baseline = 'inception'
@@ -96,20 +97,21 @@ class WSDAN_v2(nn.Module):
         H, W = attention_maps.size(2), attention_maps.size(3)
         if self.training:
             # Randomly choose one of attention maps Ak
-            k_indices = np.random.randint(self.M, size=batch_size)
-            attention_map = torch.zeros(batch_size, 1, H, W).to(torch.device("cuda"))  # (B, 1, H, W)
+            k_indices = np.random.randint(self.M, size=(batch_size, self.K))
+            attention_map = torch.zeros(batch_size, self.K, H, W).to(torch.device("cuda"))  # (B, 1, H, W)
             for i in range(batch_size):
-                attention_map[i] = attention_maps[i, k_indices[i]:k_indices[i] + 1, ...]
+                attention_map[i] = attention_maps[i, k_indices[i], ...]
         else:
             # Object Localization Am = mean(sum(Ak))
-            attention_map = torch.mean(attention_maps, dim=1, keepdim=True)  # (B, 1, H, W)
+            attention_map = attention_maps
 
         # Normalize Attention Map
+        num_maps = attention_map.size(1)
         attention_map = attention_map.view(batch_size, -1)  # (B, H * W)
         attention_map_max, _ = attention_map.max(dim=1, keepdim=True)  # (B, 1)
         attention_map_min, _ = attention_map.min(dim=1, keepdim=True)  # (B, 1)
         attention_map = (attention_map - attention_map_min) / (attention_map_max - attention_map_min)  # (B, H * W)
-        attention_map = attention_map.view(batch_size, 1, H, W)  # (B, 1, H, W)
+        attention_map = attention_map.view(batch_size, num_maps, H, W)  # (B, 1, H, W)
 
         return p, feature_matrix, attention_map
 

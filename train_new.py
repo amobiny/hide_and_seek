@@ -18,8 +18,10 @@ from datetime import datetime
 from utils.logger_utils import Logger
 from config import options
 
-TOP_K = [1]
-# TOP_K = [1, 3, 5]
+
+conditions = ['No Find', 'Enlgd Card.', 'Crdmgly', 'Opcty', 'Lsn', 'Edma', 'Cnsldton',
+              'Pnumn', 'Atlctss', 'Pnmthrx', 'Plu. Eff.', 'Plu. Othr', 'Frctr', 'S. Dev.']
+target_conditions = [2, 3, 13]
 
 
 def log_string(out_str):
@@ -28,21 +30,19 @@ def log_string(out_str):
     print(out_str)
 
 
-def accuracy(output, target, topk=(1,)):
-    """Computes the precision@k for the specified values of k"""
-    maxk = max(topk)
+def accuracy_generator(output, target):
+    """
+     Calculates the classification accuracy.
+    :param labels_tensor: Tensor of correct predictions of size [batch_size, numClasses]
+    :param logits_tensor: Predicted scores (logits) by the model.
+            It should have the same dimensions as labels_tensor
+    :return: accuracy: average accuracy over the samples of the current batch for each condition
+    :return: avg_accuracy: average accuracy over all conditions
+    """
     batch_size = target.size(0)
-
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-    res = []
-    for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0)
-        res.append(correct_k.mul_(100. / batch_size).cpu().numpy())
-
-    return np.array(res)
+    correct_pred = target.eq(output.round().long())
+    accuracy = torch.sum(correct_pred, dim=0)
+    return accuracy.cpu().numpy() * (100. / batch_size)
 
 
 def train(**kwargs):
@@ -70,7 +70,7 @@ def train(**kwargs):
     # metrics initialization
     batches = 0
     epoch_loss = np.array([0, 0, 0], dtype='float')  # Loss on Raw/Crop/Drop Images
-    epoch_acc = np.zeros((3, len(TOP_K)), dtype='float')  # Top-1/3/5 Accuracy for Raw/Crop/Drop Images
+    epoch_acc = np.zeros((3, len(target_conditions)), dtype='float')  # for Raw/Crop/Drop Images
 
     # begin training
     start_time = time.time()
@@ -89,7 +89,13 @@ def train(**kwargs):
         y_pred, feature_matrix, attention_map = net(X)
 
         # loss
-        batch_loss = loss(y_pred, y) + l2_loss(feature_matrix, feature_center[y])
+        sum_l2_loss = torch.Tensor([0.]).to(torch.device("cuda"))
+        for ii in range(X.size(0)):
+            if torch.sum(y[ii]) != 0:
+                ck = feature_center[torch.nonzero(y[ii]).view(-1).cpu().numpy()]   # [num_conds, num_att, 768]
+                fk = feature_matrix[ii:ii + 1].repeat(ck.shape[0], 1, 1)
+                sum_l2_loss += l2_loss(ck, fk)
+        batch_loss = loss(y_pred, y.float()) + sum_l2_loss
         epoch_loss[0] += batch_loss.item()
 
         # backward
@@ -98,34 +104,51 @@ def train(**kwargs):
         optimizer.step()
 
         # Update Feature Center
-        feature_center[y] += beta * (feature_matrix.detach() - feature_center[y])
+        for ii in range(X.size(0)):
+            if torch.sum(y[ii]) != 0:
+                conds = torch.nonzero(y[ii]).view(-1).cpu().numpy()
+                feature_center[conds] += beta * (feature_matrix.detach()[ii:ii+1].repeat(conds.shape[0], 1, 1)
+                                                 - feature_center[conds])   # [num_conds, num_att, 768]
+        # feature_center[y] += beta * (feature_matrix.detach() - feature_center[y])
 
         # metrics: top-1, top-3, top-5 error
         with torch.no_grad():
-            epoch_acc[0] += accuracy(y_pred, y, topk=TOP_K)
+            epoch_acc[0] += accuracy_generator(y_pred, y)
 
         ##################################
         # Attention Cropping
         ##################################
         with torch.no_grad():
-            crop_mask = F.upsample_bilinear(attention_map, size=(X.size(2), X.size(3))) > theta_c
-            crop_images = []
+            crop_mask = F.interpolate(attention_map, size=(X.size(2), X.size(3)), mode='bilinear',
+                                      align_corners=True) > theta_c
+            crop_images = torch.Tensor(X.size(0), attention_map.size(1), X.size(1), crop_size[0], crop_size[1])
             for batch_index in range(crop_mask.size(0)):
-                nonzero_indices = torch.nonzero(crop_mask[batch_index, 0, ...])
-                height_min = nonzero_indices[:, 0].min()
-                height_max = nonzero_indices[:, 0].max()
-                width_min = nonzero_indices[:, 1].min()
-                width_max = nonzero_indices[:, 1].max()
-                crop_images.append(
-                    F.upsample_bilinear(X[batch_index:batch_index + 1, :, height_min:height_max, width_min:width_max],
-                                        size=crop_size))
-            crop_images = torch.cat(crop_images, dim=0)
+                for map_index in range(crop_mask.size(1)):
+                    if torch.sum(crop_mask[batch_index, map_index]) == 0:
+                        height_min, width_min = 0, 0
+                        height_max, width_max = options.input_size, options.input_size
+                        print('0, batch: {}, map: {}'.format(batch_index, map_index))
+                    else:
+                        nonzero_indices = torch.nonzero(crop_mask[batch_index, map_index, ...])
+                        if nonzero_indices.size(0) == 1:
+                            height_min, width_min = 0, 0
+                            height_max, width_max = options.input_size, options.input_size
+                            print('1, batch: {}, map: {}'.format(batch_index, map_index))
+                        else:
+                            height_min = nonzero_indices[:, 0].min()
+                            height_max = nonzero_indices[:, 0].max()
+                            width_min = nonzero_indices[:, 1].min()
+                            width_max = nonzero_indices[:, 1].max()
+                    crop_images[batch_index, map_index] = F.upsample_bilinear(
+                        X[batch_index:batch_index + 1, :, height_min:height_max, width_min:width_max],
+                        size=crop_size)
+            crop_images = crop_images.view(-1, 3, crop_size[0], crop_size[1])
 
         # crop images forward
         y_pred, _, _ = net(crop_images)
 
         # loss
-        batch_loss = loss(y_pred, y)
+        batch_loss = loss(y_pred, y.float())
         epoch_loss[1] += batch_loss.item()
 
         # backward
@@ -135,7 +158,7 @@ def train(**kwargs):
 
         # metrics: top-1, top-3, top-5 error
         with torch.no_grad():
-            epoch_acc[1] += accuracy(y_pred, y, topk=TOP_K)
+            epoch_acc[1] += accuracy_generator(y_pred, y)
 
         ##################################
         # Attention Dropping
@@ -148,7 +171,7 @@ def train(**kwargs):
         y_pred, _, _ = net(drop_images)
 
         # loss
-        batch_loss = loss(y_pred, y)
+        batch_loss = loss(y_pred, y.float())
         epoch_loss[2] += batch_loss.item()
 
         # backward
@@ -158,33 +181,24 @@ def train(**kwargs):
 
         # metrics: top-1, top-3, top-5 error
         with torch.no_grad():
-            epoch_acc[2] += accuracy(y_pred, y, topk=TOP_K)
+            epoch_acc[2] += accuracy_generator(y_pred, y)
 
         # end of this batch
         batches += 1
         batch_end = time.time()
+
         if (i + 1) % verbose == 0:
-            if len(TOP_K) > 1:
-                log_string(
-                    '\tBatch %d: (Raw) Loss %.4f, Accuracy: (%.2f, %.2f, %.2f), (Crop) Loss %.4f, '
-                    'Accuracy: (%.2f, %.2f, %.2f), (Drop) Loss %.4f, Accuracy: (%.2f, %.2f, %.2f), Time %3.2f' %
-                    (i + 1,
-                     epoch_loss[0] / batches, epoch_acc[0, 0] / batches, epoch_acc[0, 1] / batches,
-                     epoch_acc[0, 2] / batches,
-                     epoch_loss[1] / batches, epoch_acc[1, 0] / batches, epoch_acc[1, 1] / batches,
-                     epoch_acc[1, 2] / batches,
-                     epoch_loss[2] / batches, epoch_acc[2, 0] / batches, epoch_acc[2, 1] / batches,
-                     epoch_acc[2, 2] / batches,
-                     batch_end - batch_start))
-            else:
-                log_string(
-                    '\tBatch %d: (Raw) Loss %.4f, Accuracy: %.2f, (Crop) Loss %.4f, '
-                    'Accuracy: %.2f, (Drop) Loss %.4f, Accuracy: %.2f, Time %3.2f' %
-                    (i + 1,
-                     epoch_loss[0] / batches, epoch_acc[0, 0] / batches,
-                     epoch_loss[1] / batches, epoch_acc[1, 0] / batches,
-                     epoch_loss[2] / batches, epoch_acc[2, 0] / batches,
-                     batch_end - batch_start))
+            raw_acc_str, crop_acc_str, drop_acc_str = '', '', ''
+            for ii, acc in range(epoch_acc.shape[1]):
+                raw_acc_str.append(str(epoch_acc[0, ii])+',\t')
+            log_string(
+                '\tBatch %d: (Raw) Loss %.4f, Accuracy: %.2f, (Crop) Loss %.4f, '
+                'Accuracy: %.2f, (Drop) Loss %.4f, Accuracy: %.2f, Time %3.2f' %
+                (i + 1,
+                 epoch_loss[0] / batches, epoch_acc[0, 0] / batches,
+                 epoch_loss[1] / batches, epoch_acc[1, 0] / batches,
+                 epoch_loss[2] / batches, epoch_acc[2, 0] / batches,
+                 batch_end - batch_start))
 
     # save checkpoint model
     if epoch % save_freq == 0:
@@ -207,22 +221,13 @@ def train(**kwargs):
     epoch_acc /= batches
 
     # show information for this epoch
-    if len(TOP_K) > 1:
-        log_string(
-            'Train: (Raw) Loss %.4f, Accuracy: (%.2f, %.2f, %.2f), (Crop) Loss %.4f, Accuracy: '
-            '(%.2f, %.2f, %.2f), (Drop) Loss %.4f, Accuracy: (%.2f, %.2f, %.2f), Time %3.2f' %
-            (epoch_loss[0], epoch_acc[0, 0], epoch_acc[0, 1], epoch_acc[0, 2],
-             epoch_loss[1], epoch_acc[1, 0], epoch_acc[1, 1], epoch_acc[1, 2],
-             epoch_loss[2], epoch_acc[2, 0], epoch_acc[2, 1], epoch_acc[2, 2],
-             end_time - start_time))
-    else:
-        log_string(
-            'Train: (Raw) Loss %.4f, Accuracy: %.2f, (Crop) Loss %.4f, Accuracy: '
-            '%.2f, (Drop) Loss %.4f, Accuracy: %.2f, Time %3.2f' %
-            (epoch_loss[0], epoch_acc[0, 0],
-             epoch_loss[1], epoch_acc[1, 0],
-             epoch_loss[2], epoch_acc[2, 0],
-             end_time - start_time))
+    log_string(
+        'Train: (Raw) Loss %.4f, Accuracy: %.2f, (Crop) Loss %.4f, Accuracy: '
+        '%.2f, (Drop) Loss %.4f, Accuracy: %.2f, Time %3.2f' %
+        (epoch_loss[0], epoch_acc[0, 0],
+         epoch_loss[1], epoch_acc[1, 0],
+         epoch_loss[2], epoch_acc[2, 0],
+         end_time - start_time))
 
 
 def validate(**kwargs):
@@ -231,7 +236,7 @@ def validate(**kwargs):
     net = kwargs['net']
     loss = kwargs['loss']
     verbose = kwargs['verbose']
-    log_string('--'*25)
+    log_string('--' * 25)
     log_string('Running Validation ... ')
     # Default Parameters
     theta_c = 0.5
@@ -240,9 +245,9 @@ def validate(**kwargs):
     # metrics initialization
     batches = 0
     raw_loss, crop_loss, epoch_loss = 0, 0, 0
-    raw_acc = np.array([0]*len(TOP_K), dtype='float')  # top - 1, 3, 5
-    crop_acc = np.array([0]*len(TOP_K), dtype='float')  # top - 1, 3, 5
-    epoch_acc = np.array([0]*len(TOP_K), dtype='float')  # top - 1, 3, 5
+    raw_acc = np.array([0] * len(target_conditions), dtype='float')
+    crop_acc = np.array([0] * len(target_conditions), dtype='float')
+    epoch_acc = np.array([0] * len(target_conditions), dtype='float')
 
     # begin validation
     start_time = time.time()
@@ -282,14 +287,14 @@ def validate(**kwargs):
             y_pred = (y_pred_raw + y_pred_crop) / 2
 
             # loss
-            raw_loss += loss(y_pred_raw, y).item()
-            crop_loss += loss(y_pred_crop, y).item()
-            epoch_loss += loss(y_pred, y).item()
+            raw_loss += loss(y_pred_raw, y.float()).item()
+            crop_loss += loss(y_pred_crop, y.float()).item()
+            epoch_loss += loss(y_pred, y.float()).item()
 
             # metrics: top-1, top-3, top-5 error
-            raw_acc += accuracy(y_pred_raw, y, topk=TOP_K)
-            crop_acc += accuracy(y_pred_crop, y, topk=TOP_K)
-            epoch_acc += accuracy(y_pred, y, topk=TOP_K)
+            raw_acc += accuracy_generator(y_pred_raw, y)
+            crop_acc += accuracy_generator(y_pred_crop, y)
+            epoch_acc += accuracy_generator(y_pred, y)
 
             # end of this batch
             batches += 1
@@ -315,16 +320,12 @@ def validate(**kwargs):
 
     # show information for this epoch
     log_string('\tTime %3.2f' % (end_time - start_time))
-    if len(TOP_K) > 1:
-        log_string('\tLoss %.5f,  Accuracy: Top-1 %.2f, Top-3 %.2f, Top-5 %.2f, Time %3.2f' %
-                   (epoch_loss, epoch_acc[0], epoch_acc[1], epoch_acc[2], end_time - start_time))
-    else:
-        log_string('\t LOSS: raw: %.5f, crop: %.5f, combined: %.5f' %
-                   (raw_loss, crop_loss, epoch_loss))
-        log_string('\t ACCURACY: raw: %.2f, crop: %.2f, combined: %.2f' %
-                   (raw_acc[0], crop_acc[0], epoch_acc[0]))
+    log_string('\t LOSS: raw: %.5f, crop: %.5f, combined: %.5f' %
+               (raw_loss, crop_loss, epoch_loss))
+    log_string('\t ACCURACY: raw: %.2f, crop: %.2f, combined: %.2f' %
+               (raw_acc[0], crop_acc[0], epoch_acc[0]))
 
-    log_string('--'*25)
+    log_string('--' * 25)
     log_string('')
 
     return epoch_loss
@@ -348,18 +349,18 @@ if __name__ == '__main__':
     # Initialize model
     ##################################
     image_size = (options.input_size, options.input_size)
-    num_classes = options.num_classes
+    num_classes = len(target_conditions)
     num_attentions = options.num_attentions
     start_epoch = 0
 
     feature_net = inception_v3(pretrained=True)
-    net = WSDAN(num_classes=num_classes, M=num_attentions, net=feature_net)
+    net = WSDAN_v2(num_classes=num_classes, M=num_attentions, K=options.K, net=feature_net)
 
     # feature_center: size of (#classes, #attention_maps, #channel_features)
     feature_center = torch.zeros(num_classes, num_attentions, net.num_features * net.expansion).to(torch.device("cuda"))
 
     if options.load_model:
-        ckpt = options.ckpt
+        ckpt = options.load_model_path
 
         if options.initial_training == 0:
             # Get Name (epoch)
@@ -396,9 +397,9 @@ if __name__ == '__main__':
         os.makedirs(model_dir)
 
     # bkp of model def
-    os.system('cp {}/models/wsdan.py {}'.format(BASE_DIR, save_dir))
+    os.system('cp {}/models/my_wsdan.py {}'.format(BASE_DIR, save_dir))
     # bkp of train procedure
-    os.system('cp {}/train_wsdan.py {}'.format(BASE_DIR, save_dir))
+    os.system('cp {}/train_new.py {}'.format(BASE_DIR, save_dir))
     if options.data_name == 'cheXpert':
         os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
 
@@ -413,18 +414,18 @@ if __name__ == '__main__':
     # Load dataset
     ##################################
 
-    train_dataset = data(root=data_dir, is_train=True,
+    train_dataset = data(root=data_dir, is_train=True, target_label=target_conditions,
                          input_size=image_size, data_len=options.data_len)
     train_loader = DataLoader(train_dataset, batch_size=options.batch_size, pin_memory=True,
                               shuffle=True, num_workers=options.workers, drop_last=False)
 
-    validate_dataset = data(root=data_dir, is_train=False,
+    validate_dataset = data(root=data_dir, is_train=False, target_label=target_conditions,
                             input_size=image_size, data_len=options.data_len)
     validate_loader = DataLoader(validate_dataset, batch_size=options.batch_size, pin_memory=True,
                                  shuffle=False, num_workers=options.workers, drop_last=False)
 
     optimizer = torch.optim.SGD(net.parameters(), lr=options.lr, momentum=0.9, weight_decay=0.00001)
-    loss = nn.CrossEntropyLoss()
+    loss = nn.BCEWithLogitsLoss()
 
     ##################################
     # Learning rate scheduling

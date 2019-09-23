@@ -127,7 +127,7 @@ def validate(**kwargs):
                               width_min.cpu().numpy(), width_max.cpu().numpy()]
                 visualize_attention(X[batch_index].clone().cpu().numpy(),
                                     box_coords, upsampled_attention_map[batch_index].clone().cpu().numpy(),
-                                    img_save_path=str(i) + '_' + str(batch_index) + '.png')
+                                    img_save_path=os.path.join(viz_dir, str(i) + '_' + str(batch_index) + '.png'))
 
                 crop_images.append(
                     F.upsample_bilinear(X[batch_index:batch_index + 1, :, height_min:height_max, width_min:width_max],

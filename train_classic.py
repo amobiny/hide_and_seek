@@ -4,7 +4,7 @@ Revised: May 07,2019 - Yuchong Gu
 """
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import time
 import warnings
 import numpy as np
@@ -20,6 +20,11 @@ from config import options
 
 TOP_K = [1]
 # TOP_K = [1, 3, 5]
+
+
+conditions = ['No Find', 'Enlgd Card.', 'Crdmgly', 'Opcty', 'Lsn', 'Edma', 'Cnsldton',
+              'Pnumn', 'Atlctss', 'Pnmthrx', 'Plu. Eff.', 'Plu. Othr', 'Frctr', 'S. Dev.']
+target_conditions = [13]
 
 
 def log_string(out_str):
@@ -217,7 +222,7 @@ if __name__ == '__main__':
     num_attentions = options.num_attentions
     start_epoch = 0
 
-    net = inception_v3(pretrained=True)
+    net = resnet50(pretrained=True)
     net.aux_logits = False
     # Replace the top layer for finetuning.
     net.fc = nn.Linear(net.fc.in_features, options.num_classes)
@@ -262,7 +267,7 @@ if __name__ == '__main__':
     # bkp of model def
     os.system('cp {}/models/wsdan.py {}'.format(BASE_DIR, save_dir))
     # bkp of train procedure
-    os.system('cp {}/train_wsdan.py {}'.format(BASE_DIR, save_dir))
+    os.system('cp {}/train_classic.py {}'.format(BASE_DIR, save_dir))
     if options.data_name == 'cheXpert':
         os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
 
@@ -277,12 +282,12 @@ if __name__ == '__main__':
     # Load dataset
     ##################################
 
-    train_dataset = data(root=data_dir, is_train=True,
+    train_dataset = data(root=data_dir, is_train=True, target_label=target_conditions,
                          input_size=image_size, data_len=options.data_len)
     train_loader = DataLoader(train_dataset, batch_size=options.batch_size, pin_memory=True,
                               shuffle=True, num_workers=options.workers, drop_last=False)
 
-    validate_dataset = data(root=data_dir, is_train=False,
+    validate_dataset = data(root=data_dir, is_train=False, target_label=target_conditions,
                             input_size=image_size, data_len=options.data_len)
     validate_loader = DataLoader(validate_dataset, batch_size=options.batch_size, pin_memory=True,
                                  shuffle=False, num_workers=options.workers, drop_last=False)

@@ -8,7 +8,7 @@ import numpy as np
 
 
 class CheXpertDataSet(Dataset):
-    def __init__(self, root, is_train=None, input_size=(600, 600), policy="ones", data_len=None):
+    def __init__(self, root, is_train=None, input_size=(600, 600), policy="ones", data_len=None, target_label=None):
         """
         image_list_file: path to the file containing images with corresponding labels.
         transform: optional transform to be applied on a sample.
@@ -54,10 +54,10 @@ class CheXpertDataSet(Dataset):
 
         if data_len is not None:
             self.image_names = image_names[:data_len]
-            self.labels = np.array(labels)[:, 3][:data_len]
+            self.labels = np.squeeze(np.array(labels)[:data_len, target_label])
         else:
             self.image_names = image_names
-            self.labels = np.array(labels)[:, 3]   # Opacity
+            self.labels = np.squeeze(np.array(labels)[:, target_label])
 
     def __getitem__(self, index):
         """Take the index of item and returns the image and its labels"""

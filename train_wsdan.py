@@ -357,12 +357,13 @@ if __name__ == '__main__':
     feature_center = torch.zeros(num_classes, num_attentions, net.num_features * net.expansion).to(torch.device("cuda"))
 
     if options.load_model:
-        ckpt = options.load_model_path
+        ckpt = options.ckpt
 
         if options.initial_training == 0:
             # Get Name (epoch)
             epoch_name = (ckpt.split('/')[-1]).split('.')[0]
             start_epoch = int(epoch_name)
+
 
         # Load ckpt and get state_dict
         checkpoint = torch.load(ckpt)
