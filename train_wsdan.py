@@ -21,6 +21,10 @@ from config import options
 TOP_K = [1]
 # TOP_K = [1, 3, 5]
 
+conditions = ['No Find', 'Enlgd Card.', 'Crdmgly', 'Opcty', 'Lsn', 'Edma', 'Cnsldton',
+              'Pnumn', 'Atlctss', 'Pnmthrx', 'Plu. Eff.', 'Plu. Othr', 'Frctr', 'S. Dev.']
+target_conditions = [13]
+
 
 def log_string(out_str):
     LOG_FOUT.write(out_str + '\n')
@@ -412,12 +416,12 @@ if __name__ == '__main__':
     # Load dataset
     ##################################
 
-    train_dataset = data(root=data_dir, is_train=True,
+    train_dataset = data(root=data_dir, is_train=True, target_label=target_conditions,
                          input_size=image_size, data_len=options.data_len)
     train_loader = DataLoader(train_dataset, batch_size=options.batch_size, pin_memory=True,
                               shuffle=True, num_workers=options.workers, drop_last=False)
 
-    validate_dataset = data(root=data_dir, is_train=False,
+    validate_dataset = data(root=data_dir, is_train=False, target_label=target_conditions,
                             input_size=image_size, data_len=options.data_len)
     validate_loader = DataLoader(validate_dataset, batch_size=options.batch_size, pin_memory=True,
                                  shuffle=False, num_workers=options.workers, drop_last=False)

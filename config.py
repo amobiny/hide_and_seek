@@ -8,13 +8,13 @@ parser.add_option('-e', '--epochs', dest='epochs', default=80, type='int',
                   help='number of epochs (default: 80)')
 parser.add_option('-b', '--batch-size', dest='batch_size', default=16, type='int',
                   help='batch size (default: 16)')
-parser.add_option('-v', '--verbose', dest='verbose', default=100, type='int',
+parser.add_option('-v', '--verbose', dest='verbose', default=50, type='int',
                   help='show information for each <verbose> iterations (default: 100)')
 parser.add_option('--sz', '--input_size', dest='input_size', default=448, type='int',
                   help='desired input size (default: 448)')
-parser.add_option('--nc', '--num_classes', dest='num_classes', default=14, type='int',
+parser.add_option('--nc', '--num_classes', dest='num_classes', default=2, type='int',
                   help='number of classes (default: 200)')
-parser.add_option('--natt', '--num_attentions', dest='num_attentions', default=32, type='int',
+parser.add_option('--natt', '--num_attentions', dest='num_attentions', default=10, type='int',
                   help='desired number of attention maps (default: 32)')
 parser.add_option('--katt', '--K', dest='K', default=4, type='int',
                   help='The number of attention maps selected randomly in the training phase (default: 4)')

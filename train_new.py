@@ -21,7 +21,7 @@ from config import options
 
 conditions = ['No Find', 'Enlgd Card.', 'Crdmgly', 'Opcty', 'Lsn', 'Edma', 'Cnsldton',
               'Pnumn', 'Atlctss', 'Pnmthrx', 'Plu. Eff.', 'Plu. Othr', 'Frctr', 'S. Dev.']
-target_conditions = [2, 3, 13]
+target_conditions = [3, 13]
 
 
 def log_string(out_str):
@@ -118,6 +118,10 @@ def train(**kwargs):
         ##################################
         # Attention Cropping
         ##################################
+        empty_map_count = 0
+        one_nonzero_count = 0
+        width_count = 0
+        height_count = 0
         with torch.no_grad():
             crop_mask = F.interpolate(attention_map, size=(X.size(2), X.size(3)), mode='bilinear',
                                       align_corners=True) > theta_c
@@ -127,25 +131,42 @@ def train(**kwargs):
                     if torch.sum(crop_mask[batch_index, map_index]) == 0:
                         height_min, width_min = 0, 0
                         height_max, width_max = options.input_size, options.input_size
-                        print('0, batch: {}, map: {}'.format(batch_index, map_index))
+                        # print('0, batch: {}, map: {}'.format(batch_index, map_index))
+                        empty_map_count += 1
                     else:
                         nonzero_indices = torch.nonzero(crop_mask[batch_index, map_index, ...])
                         if nonzero_indices.size(0) == 1:
                             height_min, width_min = 0, 0
                             height_max, width_max = options.input_size, options.input_size
-                            print('1, batch: {}, map: {}'.format(batch_index, map_index))
+                            # print('1, batch: {}, map: {}'.format(batch_index, map_index))
+                            one_nonzero_count += 1
                         else:
                             height_min = nonzero_indices[:, 0].min()
                             height_max = nonzero_indices[:, 0].max()
                             width_min = nonzero_indices[:, 1].min()
                             width_max = nonzero_indices[:, 1].max()
+                        if width_min == width_max:
+                            if width_min == 0:
+                                width_max += 1
+                            else:
+                                width_min -= 1
+                            width_count += 1
+                        if height_min == height_max:
+                            if height_min == 0:
+                                height_max += 1
+                            else:
+                                height_min -= 1
+                            height_count += 1
                     crop_images[batch_index, map_index] = F.upsample_bilinear(
                         X[batch_index:batch_index + 1, :, height_min:height_max, width_min:width_max],
                         size=crop_size)
-            crop_images = crop_images.view(-1, 3, crop_size[0], crop_size[1])
-
+            crop_images_reshaped = crop_images.view(-1, 3, crop_size[0], crop_size[1])
+            print('Batch {} :  empty map: {},  one nonzero idx: {}, width_issue: {}, height_issue: {}'
+                  .format(i, empty_map_count, one_nonzero_count, width_count, height_count))
         # crop images forward
-        y_pred, _, _ = net(crop_images)
+        y_pred, _, _ = net(crop_images_reshaped)
+        y_pred = y_pred.view(X.shape[0], crop_images.shape[1], num_classes)
+        y_pred = torch.mean(y_pred, dim=1)
 
         # loss
         batch_loss = loss(y_pred, y.float())
@@ -164,11 +185,15 @@ def train(**kwargs):
         # Attention Dropping
         ##################################
         with torch.no_grad():
-            drop_mask = F.upsample_bilinear(attention_map, size=(X.size(2), X.size(3))) <= theta_d
-            drop_images = X * drop_mask.float()
+            drop_mask = F.interpolate(attention_map, size=(X.size(2), X.size(3)), mode='bilinear',
+                                      align_corners=True) <= theta_d
+            drop_images = drop_mask.unsqueeze(2).float() * X.unsqueeze(1)
+            drop_images_reshaped = drop_images.view(-1, 3, X.size(2), X.size(3))
 
         # drop images forward
-        y_pred, _, _ = net(drop_images)
+        y_pred, _, _ = net(drop_images_reshaped)
+        y_pred = y_pred.view(X.shape[0], drop_images.shape[1], num_classes)
+        y_pred = torch.mean(y_pred, dim=1)
 
         # loss
         batch_loss = loss(y_pred, y.float())
@@ -189,16 +214,15 @@ def train(**kwargs):
 
         if (i + 1) % verbose == 0:
             raw_acc_str, crop_acc_str, drop_acc_str = '', '', ''
-            for ii, acc in range(epoch_acc.shape[1]):
-                raw_acc_str.append(str(epoch_acc[0, ii])+',\t')
-            log_string(
-                '\tBatch %d: (Raw) Loss %.4f, Accuracy: %.2f, (Crop) Loss %.4f, '
-                'Accuracy: %.2f, (Drop) Loss %.4f, Accuracy: %.2f, Time %3.2f' %
-                (i + 1,
-                 epoch_loss[0] / batches, epoch_acc[0, 0] / batches,
-                 epoch_loss[1] / batches, epoch_acc[1, 0] / batches,
-                 epoch_loss[2] / batches, epoch_acc[2, 0] / batches,
-                 batch_end - batch_start))
+            for ii in range(epoch_acc.shape[1]):
+                raw_acc_str += conditions[target_conditions[ii]] + ': ' + str(epoch_acc[0, ii] / batches)+',\t'
+                crop_acc_str += conditions[target_conditions[ii]] + ': ' + str(epoch_acc[1, ii] / batches)+',\t'
+                drop_acc_str += conditions[target_conditions[ii]] + ': ' + str(epoch_acc[2, ii] / batches)+',\t'
+
+            log_string('\tBatch %d, Time %3.2f' % (i + 1, batch_end - batch_start))
+            log_string('\t(Raw) Loss {0:.4f}, Accuracy: '.format(epoch_loss[0]/batches) + raw_acc_str)
+            log_string('\t(Crop) Loss {0:.4f}, Accuracy: '.format(epoch_loss[1]/batches) + crop_acc_str)
+            log_string('\t(Drop) Loss {0:.4f}, Accuracy: '.format(epoch_loss[2]/batches) + drop_acc_str)
 
     # save checkpoint model
     if epoch % save_freq == 0:
