@@ -215,9 +215,9 @@ def train(**kwargs):
         if (i + 1) % verbose == 0:
             raw_acc_str, crop_acc_str, drop_acc_str = '', '', ''
             for ii in range(epoch_acc.shape[1]):
-                raw_acc_str += conditions[target_conditions[ii]] + ': ' + str(epoch_acc[0, ii] / batches)+',\t'
-                crop_acc_str += conditions[target_conditions[ii]] + ': ' + str(epoch_acc[1, ii] / batches)+',\t'
-                drop_acc_str += conditions[target_conditions[ii]] + ': ' + str(epoch_acc[2, ii] / batches)+',\t'
+                raw_acc_str += conditions[target_conditions[ii]] + ': ' + str(round(epoch_acc[0, ii] / batches, 2))+',\t'
+                crop_acc_str += conditions[target_conditions[ii]] + ': ' + str(round(epoch_acc[1, ii] / batches, 2))+',\t'
+                drop_acc_str += conditions[target_conditions[ii]] + ': ' + str(round(epoch_acc[2, ii] / batches, 2))+',\t'
 
             log_string('\tBatch %d, Time %3.2f' % (i + 1, batch_end - batch_start))
             log_string('\t(Raw) Loss {0:.4f}, Accuracy: '.format(epoch_loss[0]/batches) + raw_acc_str)

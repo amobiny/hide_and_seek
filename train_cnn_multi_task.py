@@ -3,8 +3,6 @@ Created: May 04,2019 - Yuchong Gu
 Revised: May 07,2019 - Yuchong Gu
 """
 import os
-
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import time
 import warnings
 import numpy as np
@@ -15,16 +13,15 @@ import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 from models import *
 from datetime import datetime
+from utils.other_utils import compute_class_weights
 from utils.logger_utils import Logger
 from config import options
 
-TOP_K = [1]
-# TOP_K = [1, 3, 5]
-
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
 
 conditions = ['No Find', 'Enlgd Card.', 'Crdmgly', 'Opcty', 'Lsn', 'Edma', 'Cnsldton',
               'Pnumn', 'Atlctss', 'Pnmthrx', 'Plu. Eff.', 'Plu. Othr', 'Frctr', 'S. Dev.']
-target_conditions = [13]
+target_conditions = None
 
 
 def log_string(out_str):
@@ -33,39 +30,37 @@ def log_string(out_str):
     print(out_str)
 
 
-def accuracy(output, target, topk=(1,)):
-    """Computes the precision@k for the specified values of k"""
-    maxk = max(topk)
+def accuracy_generator(output, target):
+    """
+     Calculates the classification accuracy.
+    :param labels_tensor: Tensor of correct predictions of size [batch_size, numClasses]
+    :param logits_tensor: Predicted scores (logits) by the model.
+            It should have the same dimensions as labels_tensor
+    :return: accuracy: average accuracy over the samples of the current batch for each condition
+    :return: avg_accuracy: average accuracy over all conditions
+    """
     batch_size = target.size(0)
-
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-    res = []
-    for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0)
-        res.append(correct_k.mul_(100. / batch_size).cpu().numpy())
-
-    return np.array(res)
+    correct_pred = target.eq(output.round().long())
+    accuracy = torch.sum(correct_pred, dim=0)
+    return accuracy.cpu().numpy() * (100. / batch_size)
 
 
 def train(**kwargs):
     # Retrieve training configuration
     data_loader = kwargs['data_loader']
+    global_step = kwargs['global_step']
     net = kwargs['net']
     loss = kwargs['loss']
     optimizer = kwargs['optimizer']
     epoch = kwargs['epoch']
     save_freq = kwargs['save_freq']
     model_dir = kwargs['model_dir']
-    logs_dir = kwargs['logs_dir']
     verbose = kwargs['verbose']
 
     # metrics initialization
     batches = 0
-    epoch_loss = np.array([0], dtype='float')  # Loss on Raw/Crop/Drop Images
-    epoch_acc = np.zeros((1, len(TOP_K)), dtype='float')  # Top-1/3/5 Accuracy for Raw/Crop/Drop Images
+    epoch_loss = np.array([0], dtype='float')
+    epoch_acc = np.zeros((1, num_classes), dtype='float')
 
     # begin training
     start_time = time.time()
@@ -73,7 +68,7 @@ def train(**kwargs):
     net.train()
     for i, (X, y) in enumerate(data_loader):
         batch_start = time.time()
-
+        global_step += 1
         # obtain data for training
         X = X.to(torch.device("cuda"))
         y = y.to(torch.device("cuda"))
@@ -81,7 +76,7 @@ def train(**kwargs):
         y_pred = net(X)
 
         # loss
-        batch_loss = loss(y_pred, y)
+        batch_loss = loss(y_pred, y.float())
         epoch_loss += batch_loss.item()
 
         # backward
@@ -91,24 +86,25 @@ def train(**kwargs):
 
         # metrics: top-1, top-3, top-5 error
         with torch.no_grad():
-            epoch_acc += accuracy(y_pred, y, topk=TOP_K)
+            epoch_acc += accuracy_generator(y_pred, y)
 
         # end of this batch
         batches += 1
         batch_end = time.time()
         if (i + 1) % verbose == 0:
-            if len(TOP_K) > 1:
-                log_string(
-                    '\tBatch %d: Loss %.4f, Accuracy: (%.2f, %.2f, %.2f), Time %3.2f' %
-                    (i + 1,
-                     epoch_loss[0] / batches, epoch_acc[0] / batches, epoch_acc[1] / batches,
-                     epoch_acc[2] / batches, batch_end - batch_start))
-            else:
-                log_string(
-                    '\tBatch %d: Loss %.4f, Accuracy: %.2f, Time %3.2f' %
-                    (i + 1,
-                     epoch_loss[0] / batches, epoch_acc / batches,
-                     batch_end - batch_start))
+            acc_str = ''
+            for ii in range(epoch_acc.shape[1]):
+                acc_ii = round(epoch_acc[0, ii] / batches, 2)
+                acc_str += conditions[ii] + ': ' + str(acc_ii) + ',\t'
+            log_string('\tBatch {0}, Time {1:3.2f}, Loss {2:.4f}, meanAcc {3:2.2f}'.format(i + 1,
+                                                                                           batch_end - batch_start,
+                                                                                           epoch_loss[0] / batches,
+                                                                                           np.mean(
+                                                                                               epoch_acc) / batches))
+            # log_string('\tAccuracy: ' + acc_str)
+            info = {'loss': epoch_loss[0] / batches}
+            for tag, value in info.items():
+                train_logger.scalar_summary(tag, value, global_step)
 
     # save checkpoint model
     if epoch % save_freq == 0:
@@ -125,44 +121,41 @@ def train(**kwargs):
     # end of this epoch
     end_time = time.time()
 
-    # metrics for average
-    epoch_loss /= batches
-    epoch_acc /= batches
-
     # show information for this epoch
-    if len(TOP_K) > 1:
-        log_string(
-            'Train: (Raw) Loss %.4f, Accuracy: (%.2f, %.2f, %.2f), Time %3.2f' %
-            (epoch_loss[0], epoch_acc[0], epoch_acc[1], epoch_acc[2],
-             end_time - start_time))
-    else:
-        log_string(
-            'Train: (Raw) Loss %.4f, Accuracy: %.2f, Time %3.2f' %
-            (epoch_loss[0], epoch_acc,
-             end_time - start_time))
+    log_string('--' * 25)
+    acc_str = ''
+    for ii in range(epoch_acc.shape[1]):
+        acc_ii = round(epoch_acc[0, ii] / batches, 2)
+        acc_str += conditions[ii] + ': ' + str(acc_ii) + ',\t'
+    log_string('\tEpoch {0}, Time {1:3.2f}, Loss {2:.4f}, meanAcc {3:2.2f}'.format(epoch,
+                                                                                   end_time - start_time,
+                                                                                   epoch_loss[0] / batches,
+                                                                                   np.mean(epoch_acc) / batches))
+    log_string('\tAccuracy: ' + acc_str)
+
+    return global_step
 
 
 def validate(**kwargs):
     # Retrieve training configuration
+    global_step = kwargs['global_step']
     data_loader = kwargs['data_loader']
     net = kwargs['net']
     loss = kwargs['loss']
     verbose = kwargs['verbose']
-    log_string('--'*25)
+    log_string('--' * 25)
     log_string('Running Validation ... ')
 
     # metrics initialization
     batches = 0
     epoch_loss = 0
-    epoch_acc = np.array([0]*len(TOP_K), dtype='float')  # top - 1, 3, 5
+    epoch_acc = np.array([0] * options.num_classes, dtype='float')
 
     # begin validation
     start_time = time.time()
     net.eval()
     with torch.no_grad():
         for i, (X, y) in enumerate(data_loader):
-            batch_start = time.time()
-
             # obtain data
             X = X.to(torch.device("cuda"))
             y = y.to(torch.device("cuda"))
@@ -172,10 +165,10 @@ def validate(**kwargs):
             ##################################
             y_pred = net(X)
 
-            epoch_loss += loss(y_pred, y).item()
+            epoch_loss += loss(y_pred, y.float()).item()
 
             # metrics: top-1, top-3, top-5 error
-            epoch_acc += accuracy(y_pred, y, topk=TOP_K)
+            epoch_acc += accuracy_generator(y_pred, y)
 
             # end of this batch
             batches += 1
@@ -183,19 +176,21 @@ def validate(**kwargs):
     # end of validation
     end_time = time.time()
 
-    # metrics for average
-    epoch_loss /= batches
-    epoch_acc /= batches
-
     # show information for this epoch
-    if len(TOP_K) > 1:
-        log_string('\tLoss %.5f,  Accuracy: Top-1 %.2f, Top-3 %.2f, Top-5 %.2f, Time %3.2f' %
-                   (epoch_loss, epoch_acc[0], epoch_acc[1], epoch_acc[2], end_time - start_time))
-    else:
-        log_string('\t, Loss: %.5f, Accuracy: %.2f, Time %3.2f' %
-                   (epoch_loss, epoch_acc, end_time - start_time))
-    log_string('--'*25)
+    acc_str = ''
+    for ii in range(len(epoch_acc)):
+        acc_ii = round(epoch_acc[ii] / batches, 2)
+        acc_str += conditions[ii] + ': ' + str(acc_ii) + ',\t'
+    log_string('\tTime {0:3.2f}, Loss {1:.4f}, meanAcc {2:2.2f}'.format(end_time - start_time,
+                                                                        epoch_loss / batches,
+                                                                        np.mean(epoch_acc) / batches))
+    log_string('\tAccuracy: ' + acc_str)
+    log_string('--' * 25)
     log_string('')
+
+    info = {'loss': epoch_loss / batches}
+    for tag, value in info.items():
+        val_logger.scalar_summary(tag, value, global_step)
 
     return epoch_loss
 
@@ -225,7 +220,7 @@ if __name__ == '__main__':
     net = resnet50(pretrained=True)
     net.aux_logits = False
     # Replace the top layer for finetuning.
-    net.fc = nn.Linear(net.fc.in_features, options.num_classes)
+    net.fc = nn.Linear(net.fc.in_features, num_classes)
 
     if options.load_model:
         ckpt = options.ckpt
@@ -243,11 +238,6 @@ if __name__ == '__main__':
         net.load_state_dict(state_dict)
         log_string('Network loaded from {}'.format(options.ckpt))
 
-        # load feature center
-        if 'feature_center' in checkpoint:
-            feature_center = checkpoint['feature_center'].to(torch.device("cuda"))
-            log_string('feature_center loaded from {}'.format(options.ckpt))
-
     ##################################
     # Initialize saving directory
     ##################################
@@ -264,10 +254,8 @@ if __name__ == '__main__':
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
 
-    # bkp of model def
-    os.system('cp {}/models/wsdan.py {}'.format(BASE_DIR, save_dir))
     # bkp of train procedure
-    os.system('cp {}/train_classic.py {}'.format(BASE_DIR, save_dir))
+    os.system('cp {}/train_cnn_multi_task.py {}'.format(BASE_DIR, save_dir))
     if options.data_name == 'cheXpert':
         os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
 
@@ -292,8 +280,12 @@ if __name__ == '__main__':
     validate_loader = DataLoader(validate_dataset, batch_size=options.batch_size, pin_memory=True,
                                  shuffle=False, num_workers=options.workers, drop_last=False)
 
+    if options.weighted_loss:
+        pos_weight = torch.from_numpy(compute_class_weights(train_dataset.labels, wt_type='balanced'))
+    else:
+        pos_weight = torch.ones([num_classes])
     optimizer = torch.optim.SGD(net.parameters(), lr=options.lr, momentum=0.9, weight_decay=0.00001)
-    loss = nn.CrossEntropyLoss()
+    loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight.float().to(torch.device("cuda")))
 
     ##################################
     # Learning rate scheduling
@@ -312,18 +304,22 @@ if __name__ == '__main__':
                format(options.epochs, options.batch_size, len(train_dataset), len(validate_dataset)))
     train_logger = Logger(os.path.join(logs_dir, 'train'))
     val_logger = Logger(os.path.join(logs_dir, 'val'))
+    num_train_batches = len(train_loader) / options.batch_size
+
+    global_step = 0
 
     for epoch in range(start_epoch, options.epochs):
-        train(epoch=epoch,
-              data_loader=train_loader,
-              net=net,
-              loss=loss,
-              optimizer=optimizer,
-              save_freq=options.save_freq,
-              model_dir=model_dir,
-              logs_dir=logs_dir,
-              verbose=options.verbose)
-        val_loss = validate(data_loader=validate_loader,
+        global_step = train(epoch=epoch,
+                            global_step=global_step,
+                            data_loader=train_loader,
+                            net=net,
+                            loss=loss,
+                            optimizer=optimizer,
+                            save_freq=options.save_freq,
+                            model_dir=model_dir,
+                            verbose=options.verbose)
+        val_loss = validate(global_step=global_step,
+                            data_loader=validate_loader,
                             net=net,
                             loss=loss,
                             verbose=options.verbose)

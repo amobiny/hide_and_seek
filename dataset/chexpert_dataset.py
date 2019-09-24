@@ -52,6 +52,9 @@ class CheXpertDataSet(Dataset):
                 image_names.append(os.path.join(os.path.dirname(root), image_name))
                 labels.append(label)
 
+        if target_label is None:
+            target_label = list(range(np.array(labels).shape[-1]))
+
         if data_len is not None:
             self.image_names = image_names[:data_len]
             self.labels = np.squeeze(np.array(labels)[:data_len, target_label])
