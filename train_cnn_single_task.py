@@ -288,11 +288,12 @@ if __name__ == '__main__':
                                  shuffle=False, num_workers=options.workers, drop_last=False)
 
     if options.weighted_loss:
-        pos_weight = torch.from_numpy(compute_class_weights(train_dataset.labels, wt_type='balanced'))
+        # pos_weight = torch.from_numpy(compute_class_weights(train_dataset.labels, wt_type='balanced'))
+        pos_weight = torch.ones([num_classes])
     else:
         pos_weight = torch.ones([num_classes])
     optimizer = torch.optim.SGD(net.parameters(), lr=options.lr, momentum=0.9, weight_decay=0.00001)
-    loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight.float().to(torch.device("cuda")))
+    loss = nn.CrossEntropyLoss(weight=pos_weight.float().to(torch.device("cuda")))
 
     ##################################
     # Learning rate scheduling

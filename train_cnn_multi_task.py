@@ -11,11 +11,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
+from torchvision.models import densenet121
+
 from models import *
 from datetime import datetime
-from utils.other_utils import compute_class_weights
+from utils.other_utils import compute_class_weights, compute_metrics
 from utils.logger_utils import Logger
 from config import options
+from dataset.chexpert_dataset import CheXpertDataSet as data
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
 
@@ -40,7 +43,8 @@ def accuracy_generator(output, target):
     :return: avg_accuracy: average accuracy over all conditions
     """
     batch_size = target.size(0)
-    correct_pred = target.eq(output.round().long())
+    sigmoid_output = torch.sigmoid(output)
+    correct_pred = target.eq(sigmoid_output.round().long())
     accuracy = torch.sum(correct_pred, dim=0)
     return accuracy.cpu().numpy() * (100. / batch_size)
 
@@ -52,162 +56,163 @@ def train(**kwargs):
     net = kwargs['net']
     loss = kwargs['loss']
     optimizer = kwargs['optimizer']
-    epoch = kwargs['epoch']
-    save_freq = kwargs['save_freq']
     model_dir = kwargs['model_dir']
     verbose = kwargs['verbose']
+    val_freq = kwargs['val_freq']
 
-    # metrics initialization
-    batches = 0
-    epoch_loss = np.array([0], dtype='float')
-    epoch_acc = np.zeros((1, num_classes), dtype='float')
+    best_val_loss = 100
+    for epoch in range(start_epoch, options.epochs):
 
-    # begin training
-    start_time = time.time()
-    log_string('Training Epoch %03d, Learning Rate %g' % (epoch + 1, optimizer.param_groups[0]['lr']))
-    net.train()
-    for i, (X, y) in enumerate(data_loader):
-        batch_start = time.time()
-        global_step += 1
-        # obtain data for training
-        X = X.to(torch.device("cuda"))
-        y = y.to(torch.device("cuda"))
+        # metrics initialization
+        batches = 0
+        epoch_loss = np.array([0], dtype='float')
+        epoch_acc = np.zeros((1, num_classes), dtype='float')
 
-        y_pred = net(X)
+        # begin training
+        start_time = time.time()
+        log_string('Training Epoch %03d, Learning Rate %g' % (epoch + 1, optimizer.param_groups[0]['lr']))
+        net.train()
+        for i, (X, y) in enumerate(data_loader):
+            global_step += 1
+            # obtain data for training
+            X = X.to(torch.device("cuda"))
+            y = y.to(torch.device("cuda"))
 
-        # loss
-        batch_loss = loss(y_pred, y.float())
-        epoch_loss += batch_loss.item()
+            y_pred = net(X)
 
-        # backward
-        optimizer.zero_grad()
-        batch_loss.backward()
-        optimizer.step()
+            # loss
+            batch_loss = loss(y_pred, y.float())
+            epoch_loss += batch_loss.item()
 
-        # metrics: top-1, top-3, top-5 error
-        with torch.no_grad():
-            epoch_acc += accuracy_generator(y_pred, y)
+            # backward
+            optimizer.zero_grad()
+            batch_loss.backward()
+            optimizer.step()
 
-        # end of this batch
-        batches += 1
-        batch_end = time.time()
-        if (i + 1) % verbose == 0:
-            acc_str = ''
-            for ii in range(epoch_acc.shape[1]):
-                acc_ii = round(epoch_acc[0, ii] / batches, 2)
-                acc_str += conditions[ii] + ': ' + str(acc_ii) + ',\t'
-            log_string('\tBatch {0}, Time {1:3.2f}, Loss {2:.4f}, meanAcc {3:2.2f}'.format(i + 1,
-                                                                                           batch_end - batch_start,
-                                                                                           epoch_loss[0] / batches,
-                                                                                           np.mean(
-                                                                                               epoch_acc) / batches))
-            # log_string('\tAccuracy: ' + acc_str)
-            info = {'loss': epoch_loss[0] / batches}
-            for tag, value in info.items():
-                train_logger.scalar_summary(tag, value, global_step)
+            with torch.no_grad():
+                epoch_acc += accuracy_generator(y_pred, y)
 
-    # save checkpoint model
-    if epoch % save_freq == 0:
-        state_dict = net.module.state_dict()
-        for key in state_dict.keys():
-            state_dict[key] = state_dict[key].cpu()
+            # end of this batch
+            batches += 1
 
-        torch.save({
-            'epoch': epoch,
-            'save_dir': model_dir,
-            'state_dict': state_dict},
-            os.path.join(model_dir, '%03d.ckpt' % (epoch + 1)))
+            if (i + 1) % verbose == 0:
 
-    # end of this epoch
-    end_time = time.time()
+                log_string('Batch {0}, Loss {1:.4f}, meanAcc {2:2.2f}'.format(i + 1,
+                                                                              epoch_loss[0] / batches,
+                                                                              np.mean(epoch_acc) / batches))
+                info = {'loss': epoch_loss[0] / batches}
+                for tag, value in info.items():
+                    train_logger.scalar_summary(tag, value, global_step)
 
-    # show information for this epoch
-    log_string('--' * 25)
-    acc_str = ''
-    for ii in range(epoch_acc.shape[1]):
-        acc_ii = round(epoch_acc[0, ii] / batches, 2)
-        acc_str += conditions[ii] + ': ' + str(acc_ii) + ',\t'
-    log_string('\tEpoch {0}, Time {1:3.2f}, Loss {2:.4f}, meanAcc {3:2.2f}'.format(epoch,
-                                                                                   end_time - start_time,
-                                                                                   epoch_loss[0] / batches,
-                                                                                   np.mean(epoch_acc) / batches))
-    log_string('\tAccuracy: ' + acc_str)
+            if (i + 1) % val_freq == 0:
+                # results on training data
+                acc_str = ''
+                for ii in range(epoch_acc.shape[1]):
+                    acc_ii = round(epoch_acc[0, ii] / batches, 2)
+                    acc_str += '{}: '.format(ii) + str(acc_ii) + ',\t'
+                log_string('Training Accuracy:')
+                log_string(acc_str)
 
-    return global_step
+                val_loss, best_val_loss, eval_metrics = validate(data_loader=validate_loader,
+                                                                 best_val_loss=best_val_loss,
+                                                                 net=net,
+                                                                 loss=loss,
+                                                                 verbose=options.verbose)
+
+                # write to tensorboard
+                info = {'loss': epoch_loss, 'lr': optimizer.param_groups[0]['lr']}
+                for tag, value in info.items():
+                    val_logger.scalar_summary(tag, value, global_step)
+                for k, v in eval_metrics['aucs'].items():
+                    val_logger.scalar_summary('{}_auc'.format(conditions[k]), v, global_step)
+                for k, v in enumerate(eval_metrics['acc']):
+                    val_logger.scalar_summary('{}_accuracy'.format(conditions[k]), v, global_step)
+
+                # save checkpoint model
+                state_dict = net.module.state_dict()
+                for key in state_dict.keys():
+                    state_dict[key] = state_dict[key].cpu()
+
+                torch.save({
+                    'epoch': epoch,
+                    'global_step': global_step,
+                    'val_loss': val_loss,
+                    'avg_acc': eval_metrics['acc'].mean(),
+                    'avg_aucs': np.nanmean(np.array(list(eval_metrics['aucs'].values()))),
+                    'save_dir': model_dir,
+                    'state_dict': state_dict},
+                    os.path.join(model_dir, '{}.ckpt'.format(global_step)))
+
+            net.train()
+
+        # end of this epoch
+        end_time = time.time()
+        scheduler.step()
+
+        # show information for this epoch
+        log_string('--' * 25)
+        log_string('Epoch {0}, Time {1:3.2f}'.format(epoch, end_time - start_time))
 
 
+@torch.no_grad()
 def validate(**kwargs):
     # Retrieve training configuration
-    global_step = kwargs['global_step']
     data_loader = kwargs['data_loader']
     net = kwargs['net']
     loss = kwargs['loss']
-    verbose = kwargs['verbose']
+    best_val_loss = kwargs['best_val_loss']
     log_string('--' * 25)
     log_string('Running Validation ... ')
 
     # metrics initialization
     batches = 0
     epoch_loss = 0
-    epoch_acc = np.array([0] * options.num_classes, dtype='float')
+    targets, outputs = [], []
 
     # begin validation
     start_time = time.time()
     net.eval()
     with torch.no_grad():
         for i, (X, y) in enumerate(data_loader):
-            # obtain data
             X = X.to(torch.device("cuda"))
             y = y.to(torch.device("cuda"))
-
-            ##################################
-            # Raw Image
-            ##################################
             y_pred = net(X)
-
             epoch_loss += loss(y_pred, y.float()).item()
-
-            # metrics: top-1, top-3, top-5 error
-            epoch_acc += accuracy_generator(y_pred, y)
-
-            # end of this batch
+            outputs += [y_pred]
+            targets += [y]
             batches += 1
 
     # end of validation
     end_time = time.time()
+    epoch_loss /= batches
+    eval_metrics = compute_metrics(torch.cat(outputs).cpu(), torch.cat(targets).cpu())
 
+    if epoch_loss <= best_val_loss:
+        best_val_loss = epoch_loss
+        im_string = '(validation loss improved)'
+    else:
+        im_string = ''
     # show information for this epoch
-    acc_str = ''
-    for ii in range(len(epoch_acc)):
-        acc_ii = round(epoch_acc[ii] / batches, 2)
-        acc_str += conditions[ii] + ': ' + str(acc_ii) + ',\t'
-    log_string('\tTime {0:3.2f}, Loss {1:.4f}, meanAcc {2:2.2f}'.format(end_time - start_time,
-                                                                        epoch_loss / batches,
-                                                                        np.mean(epoch_acc) / batches))
-    log_string('\tAccuracy: ' + acc_str)
+    str_print = ''
+    for ii in range(len(eval_metrics['acc'])):
+        acc_ii = round(eval_metrics['acc'][ii], 2)
+        auc_ii = round(eval_metrics['aucs'][ii], 2)
+        str_print += '{0:<13}: {1:<7}, {2:<7}'.format(conditions[ii], str(acc_ii), str(auc_ii)) + '\n'
+    log_string('Time {0:3.2f}, Loss {1:.4f}, meanAcc {2:2.2f} {3}'.format(end_time - start_time,
+                                                                          epoch_loss,
+                                                                          eval_metrics['acc'].mean(),
+                                                                          im_string))
+    log_string('{0:<13} {1:<9} {2:<10}'.format('Class Name', 'Accuracy', 'AUC'))
+    log_string(str_print)
     log_string('--' * 25)
     log_string('')
 
-    info = {'loss': epoch_loss / batches}
-    for tag, value in info.items():
-        val_logger.scalar_summary(tag, value, global_step)
-
-    return epoch_loss
+    return epoch_loss, best_val_loss, eval_metrics
 
 
 if __name__ == '__main__':
     warnings.filterwarnings("ignore")
-
-    if options.data_name == 'CUB':
-        from dataset.dataset_CUB import CUB as data
-
-        data_dir = '/home/cougarnet.uh.edu/amobiny/Desktop/NTS_network/CUB_200_2011'
-    elif options.data_name == 'cheXpert':
-        from dataset.chexpert_dataset import CheXpertDataSet as data
-
-        data_dir = '/home/cougarnet.uh.edu/amobiny/Desktop/CheXpert-v1.0-small'
-    else:
-        raise NameError('Dataset not available!')
+    data_dir = '/home/cougarnet.uh.edu/amobiny/Desktop/CheXpert-v1.0-small'
 
     ##################################
     # Initialize model
@@ -216,23 +221,28 @@ if __name__ == '__main__':
     num_classes = options.num_classes
     num_attentions = options.num_attentions
     start_epoch = 0
+    global_step = 0
 
-    net = resnet50(pretrained=True)
-    net.aux_logits = False
+    if options.model == 'densenet121':
+        net = densenet121(pretrained=True)
+        num_ftrs = net.classifier.in_features
+        net.classifier = nn.Linear(num_ftrs, num_classes)
+    elif options.model == 'resnet50':
+        net = resnet50(pretrained=True)
+        net.fc = nn.Linear(net.fc.in_features, num_classes)
+    elif options.model == 'inception':
+        net = inception_v3(pretrained=True)
+        net.aux_logits = False
+        net.fc = nn.Linear(net.fc.in_features, num_classes)
     # Replace the top layer for finetuning.
-    net.fc = nn.Linear(net.fc.in_features, num_classes)
 
     if options.load_model:
         ckpt = options.ckpt
 
-        if options.initial_training == 0:
-            # Get Name (epoch)
-            epoch_name = (ckpt.split('/')[-1]).split('.')[0]
-            start_epoch = int(epoch_name)
-
         # Load ckpt and get state_dict
         checkpoint = torch.load(ckpt)
         state_dict = checkpoint['state_dict']
+        global_step = checkpoint['global_step']
 
         # Load weights
         net.load_state_dict(state_dict)
@@ -284,14 +294,15 @@ if __name__ == '__main__':
         pos_weight = torch.from_numpy(compute_class_weights(train_dataset.labels, wt_type='balanced'))
     else:
         pos_weight = torch.ones([num_classes])
-    optimizer = torch.optim.SGD(net.parameters(), lr=options.lr, momentum=0.9, weight_decay=0.00001)
+    # optimizer = torch.optim.SGD(net.parameters(), lr=options.lr, momentum=0.9, weight_decay=0.00001)
+    optimizer = torch.optim.Adam(net.parameters(), lr=options.lr)
     loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight.float().to(torch.device("cuda")))
 
     ##################################
     # Learning rate scheduling
     ##################################
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=2)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.9)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.95)
 
     ##################################
     # TRAINING
@@ -306,21 +317,11 @@ if __name__ == '__main__':
     val_logger = Logger(os.path.join(logs_dir, 'val'))
     num_train_batches = len(train_loader) / options.batch_size
 
-    global_step = 0
-
-    for epoch in range(start_epoch, options.epochs):
-        global_step = train(epoch=epoch,
-                            global_step=global_step,
-                            data_loader=train_loader,
-                            net=net,
-                            loss=loss,
-                            optimizer=optimizer,
-                            save_freq=options.save_freq,
-                            model_dir=model_dir,
-                            verbose=options.verbose)
-        val_loss = validate(global_step=global_step,
-                            data_loader=validate_loader,
-                            net=net,
-                            loss=loss,
-                            verbose=options.verbose)
-        scheduler.step()
+    train(global_step=global_step,
+          data_loader=train_loader,
+          net=net,
+          loss=loss,
+          optimizer=optimizer,
+          model_dir=model_dir,
+          verbose=options.verbose,
+          val_freq=options.val_freq)
