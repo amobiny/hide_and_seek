@@ -15,7 +15,7 @@ from torchvision.models import densenet121
 
 from models import *
 from datetime import datetime
-from utils.other_utils import compute_class_weights, compute_metrics
+from utils.other_utils import compute_class_weights, compute_metrics, compute_accuracy
 from utils.logger_utils import Logger
 from config import options
 from dataset.chexpert_dataset import CheXpertDataSet as data
@@ -31,22 +31,6 @@ def log_string(out_str):
     LOG_FOUT.write(out_str + '\n')
     LOG_FOUT.flush()
     print(out_str)
-
-
-def accuracy_generator(output, target):
-    """
-     Calculates the classification accuracy.
-    :param labels_tensor: Tensor of correct predictions of size [batch_size, numClasses]
-    :param logits_tensor: Predicted scores (logits) by the model.
-            It should have the same dimensions as labels_tensor
-    :return: accuracy: average accuracy over the samples of the current batch for each condition
-    :return: avg_accuracy: average accuracy over all conditions
-    """
-    batch_size = target.size(0)
-    sigmoid_output = torch.sigmoid(output)
-    correct_pred = target.eq(sigmoid_output.round().long())
-    accuracy = torch.sum(correct_pred, dim=0)
-    return accuracy.cpu().numpy() * (100. / batch_size)
 
 
 def train(**kwargs):
@@ -90,7 +74,7 @@ def train(**kwargs):
             optimizer.step()
 
             with torch.no_grad():
-                epoch_acc += accuracy_generator(y_pred, y)
+                epoch_acc += compute_accuracy(y_pred, y)
 
             # end of this batch
             batches += 1
@@ -100,7 +84,8 @@ def train(**kwargs):
                 log_string('Batch {0}, Loss {1:.4f}, meanAcc {2:2.2f}'.format(i + 1,
                                                                               epoch_loss[0] / batches,
                                                                               np.mean(epoch_acc) / batches))
-                info = {'loss': epoch_loss[0] / batches}
+                info = {'loss': epoch_loss[0] / batches,
+                        'lr': optimizer.param_groups[0]['lr']}
                 for tag, value in info.items():
                     train_logger.scalar_summary(tag, value, global_step)
 
@@ -110,7 +95,8 @@ def train(**kwargs):
                 for ii in range(epoch_acc.shape[1]):
                     acc_ii = round(epoch_acc[0, ii] / batches, 2)
                     acc_str += '{}: '.format(ii) + str(acc_ii) + ',\t'
-                log_string('Training Accuracy:')
+                log_string('--' * 25)
+                log_string('Training Performance:\n')
                 log_string(acc_str)
 
                 val_loss, best_val_loss, eval_metrics = validate(data_loader=validate_loader,
@@ -120,7 +106,7 @@ def train(**kwargs):
                                                                  verbose=options.verbose)
 
                 # write to tensorboard
-                info = {'loss': epoch_loss, 'lr': optimizer.param_groups[0]['lr']}
+                info = {'loss': epoch_loss}
                 for tag, value in info.items():
                     val_logger.scalar_summary(tag, value, global_step)
                 for k, v in eval_metrics['aucs'].items():
@@ -162,7 +148,7 @@ def validate(**kwargs):
     loss = kwargs['loss']
     best_val_loss = kwargs['best_val_loss']
     log_string('--' * 25)
-    log_string('Running Validation ... ')
+    log_string('Validation Performance:\n')
 
     # metrics initialization
     batches = 0
@@ -198,10 +184,12 @@ def validate(**kwargs):
         acc_ii = round(eval_metrics['acc'][ii], 2)
         auc_ii = round(eval_metrics['aucs'][ii], 2)
         str_print += '{0:<13}: {1:<7}, {2:<7}'.format(conditions[ii], str(acc_ii), str(auc_ii)) + '\n'
-    log_string('Time {0:3.2f}, Loss {1:.4f}, meanAcc {2:2.2f} {3}'.format(end_time - start_time,
-                                                                          epoch_loss,
-                                                                          eval_metrics['acc'].mean(),
-                                                                          im_string))
+    mean_auc = np.nanmean(np.array(list(eval_metrics['aucs'].values())))
+    log_string('Time {0:3.2f}, Loss {1:.4f}, meanAcc {2:2.2f}, meanAUC {2:2.2f}, {4}'.format(end_time - start_time,
+                                                                                             epoch_loss,
+                                                                                             eval_metrics['acc'].mean(),
+                                                                                             mean_auc,
+                                                                                             im_string))
     log_string('{0:<13} {1:<9} {2:<10}'.format('Class Name', 'Accuracy', 'AUC'))
     log_string(str_print)
     log_string('--' * 25)
@@ -212,7 +200,7 @@ def validate(**kwargs):
 
 if __name__ == '__main__':
     warnings.filterwarnings("ignore")
-    data_dir = '/home/cougarnet.uh.edu/amobiny/Desktop/CheXpert-v1.0-small'
+    data_dir = options.data_dir
 
     ##################################
     # Initialize model
@@ -234,7 +222,6 @@ if __name__ == '__main__':
         net = inception_v3(pretrained=True)
         net.aux_logits = False
         net.fc = nn.Linear(net.fc.in_features, num_classes)
-    # Replace the top layer for finetuning.
 
     if options.load_model:
         ckpt = options.ckpt
@@ -266,8 +253,7 @@ if __name__ == '__main__':
 
     # bkp of train procedure
     os.system('cp {}/train_cnn_multi_task.py {}'.format(BASE_DIR, save_dir))
-    if options.data_name == 'cheXpert':
-        os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
+    os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
 
     ##################################
     # Use cuda
