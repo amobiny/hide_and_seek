@@ -83,13 +83,23 @@ def train(**kwargs):
             y_pred, feature_matrix, attention_map = net(X)
 
             # loss
-            sum_l2_loss = torch.Tensor([0.]).to(torch.device("cuda"))
-            for ii in range(X.size(0)):
-                if torch.sum(y[ii]) != 0:
-                    ck = feature_center[torch.nonzero(y[ii]).view(-1).cpu().numpy()]  # [num_conds, num_att, 768]
-                    fk = feature_matrix[ii:ii + 1].repeat(ck.shape[0], 1, 1)
-                    sum_l2_loss += l2_loss(ck, fk)
-            batch_loss = loss(y_pred, y.float()) + sum_l2_loss
+
+            # v01
+            # sum_l2_loss = torch.Tensor([0.]).to(torch.device("cuda"))
+            # for ii in range(X.size(0)):
+            #     if torch.sum(y[ii]) != 0:
+            #         ck = feature_center[torch.nonzero(y[ii]).view(-1).cpu().numpy()]  # [num_conds, num_att, 768]
+            #         fk = feature_matrix[ii:ii + 1].repeat(ck.shape[0], 1, 1)
+            #         sum_l2_loss += l2_loss(ck, fk)
+            # batch_loss = loss(y_pred, y.float()) + sum_l2_loss
+
+            # v02
+            batch_samples = y.shape[0]
+            index_matrix = torch.tensor(np.tile(np.arange(num_classes), batch_samples)
+                                        .reshape(batch_samples, num_classes), device='cuda')
+            batch_loss = loss(y_pred, y.float()) + l2_loss(feature_center[y, index_matrix],
+                                                           feature_matrix.unsqueeze(1).repeat(1, num_classes, 1, 1))
+
             epoch_loss[0] += batch_loss.item()
 
             # backward
@@ -98,12 +108,17 @@ def train(**kwargs):
             optimizer.step()
 
             # Update Feature Center
-            for ii in range(X.size(0)):
-                if torch.sum(y[ii]) != 0:
-                    conds = torch.nonzero(y[ii]).view(-1).cpu().numpy()
-                    feature_center[conds] += beta * (feature_matrix.detach()[ii:ii + 1].repeat(conds.shape[0], 1, 1)
-                                                     - feature_center[conds])  # [num_conds, num_att, 768]
-            # feature_center[y] += beta * (feature_matrix.detach() - feature_center[y])
+
+            # v01
+            # for ii in range(X.size(0)):
+            #     if torch.sum(y[ii]) != 0:
+            #         conds = torch.nonzero(y[ii]).view(-1).cpu().numpy()
+            #         feature_center[conds] += beta * (feature_matrix.detach()[ii:ii + 1].repeat(conds.shape[0], 1, 1)
+            #                                          - feature_center[conds])  # [num_conds, num_att, 768]
+
+            # v02
+            feature_center[y, index_matrix] += beta * (feature_matrix.unsqueeze(1).repeat(1, num_classes, 1, 1).detach()
+                                                       - feature_center[y, index_matrix])
 
             with torch.no_grad():
                 epoch_acc[0] += compute_accuracy(y_pred, y)
@@ -206,9 +221,9 @@ def train(**kwargs):
                 log_string('iter {0:<5}: raw_loss={1:.4f}, raw_acc={2:2.2f}, '
                            'crp_loss={3:.4f}, crp_acc={4:2.2f}, '
                            'drp_loss={5:.4f}, drp_acc={6:2.2f}'
-                           .format(i + 1, epoch_loss[0] / batches, epoch_acc[0, ii] / batches,
-                                   epoch_loss[1] / batches, epoch_acc[1, ii] / batches,
-                                   epoch_loss[2] / batches, epoch_acc[2, ii] / batches))
+                           .format(i + 1, epoch_loss[0]/batches, epoch_acc[0, :].mean()/batches,
+                                   epoch_loss[1]/batches, epoch_acc[1, :].mean()/batches,
+                                   epoch_loss[2]/batches, epoch_acc[2, :].mean()/batches))
 
                 # write to tensorboard
                 info = {'raw_loss': epoch_loss[0] / batches,
@@ -424,8 +439,8 @@ if __name__ == '__main__':
 
     if options.model == 'densenet121':
         feature_net = densenet121(pretrained=True)
-    elif options.model == 'resnet50':
-        feature_net = resnet50(pretrained=True)
+    elif options.model == 'resnet152':
+        feature_net = resnet152(pretrained=True)
     elif options.model == 'inception':
         feature_net = inception_v3(pretrained=True)
     else:
@@ -434,7 +449,8 @@ if __name__ == '__main__':
     net = WSDAN_v2(num_classes=num_classes, M=num_attentions, K=options.K, net=feature_net)
 
     # feature_center: size of (#classes, #attention_maps, #channel_features)
-    feature_center = torch.zeros(num_classes, num_attentions, net.num_features * net.expansion).to(torch.device("cuda"))
+    # feature_center = torch.zeros(num_classes, num_attentions, net.num_features * net.expansion).to(torch.device("cuda"))
+    feature_center = torch.zeros(2, num_classes, num_attentions, net.num_features * net.expansion).to(torch.device("cuda"))
 
     if options.load_model:
         ckpt = options.load_model_path

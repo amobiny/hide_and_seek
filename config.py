@@ -3,9 +3,9 @@ from optparse import OptionParser
 
 parser = OptionParser()
 
-parser.add_option('-v', '--verbose', dest='verbose', default=100, type='int',
+parser.add_option('-v', '--verbose', dest='verbose', default=10, type='int',
                   help='show information for each <verbose> iterations (default: 100)')
-parser.add_option('--vf', '--val_freq', dest='val_freq', default=2000, type='int',
+parser.add_option('--vf', '--val_freq', dest='val_freq', default=20, type='int',
                   help='run validation for each <val_freq> iterations (default: 2000)')
 
 parser.add_option('-j', '--workers', dest='workers', default=1, type='int',
@@ -30,12 +30,12 @@ parser.add_option('--katt', '--K', dest='K', default=4, type='int',
 parser.add_option('--dl', '--data_len', dest='data_len', default=None, type='int',
                   help='Length of the training and vaidation data (default: None which takes all)')
 parser.add_option('--mdl', '--model', dest='model', default='inception',
-                  help='name of the model; densenet121 or resnet50 or inception (default: densenet121)')
+                  help='name of the model; inception, densenet121 or resnet152 (default: inception)')
 
 # loss
 parser.add_option('--lr', '--learning-rate', dest='lr', default=1e-3, type='float',
                   help='learning rate (default: 1e-3)')
-parser.add_option('--lm', '--weighted_loss', dest='weighted_loss', default=True,
+parser.add_option('--wl', '--weighted_loss', dest='weighted_loss', default=False,
                   help='whether to use weighted loss or not')
 
 parser.add_option('--sd', '--save-dir', dest='save_dir', default='./save',
@@ -43,7 +43,7 @@ parser.add_option('--sd', '--save-dir', dest='save_dir', default='./save',
 
 
 # loading a trained model
-parser.add_option('--wl', '--load_model', dest='load_model', default=False,
+parser.add_option('--lm', '--load_model', dest='load_model', default=False,
                   help='load checkpoint model (default: False)')
 parser.add_option('--lp', '--load_model_path', dest='load_model_path',
                   default='/home/cougarnet.uh.edu/amobiny/Desktop/hide_and_seek/'

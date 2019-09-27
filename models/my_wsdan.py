@@ -12,7 +12,7 @@ import logging
 import numpy as np
 import torch
 import torch.nn as nn
-
+import random
 from models.vgg import VGG
 from models.resnet import ResNet
 from models.inception import *
@@ -97,21 +97,21 @@ class WSDAN_v2(nn.Module):
         H, W = attention_maps.size(2), attention_maps.size(3)
         if self.training:
             # Randomly choose one of attention maps Ak
-            k_indices = np.random.randint(self.M, size=(batch_size, self.K))
+            k_indices = np.array([random.sample(range(self.M), self.K) for _ in range(batch_size)])
             attention_map = torch.zeros(batch_size, self.K, H, W).to(torch.device("cuda"))  # (B, 1, H, W)
             for i in range(batch_size):
                 attention_map[i] = attention_maps[i, k_indices[i], ...]
         else:
             # Object Localization Am = mean(sum(Ak))
-            attention_map = torch.mean(attention_maps, dim=1, keepdim=True)  # (B, 1, H, W)
+            attention_map = torch.mean(attention_maps, dim=1, keepdim=True)  # (B, K=1, H, W)
 
         # Normalize Attention Map
         num_maps = attention_map.size(1)
-        attention_map = attention_map.view(batch_size, -1)  # (B, H * W)
-        attention_map_max, _ = attention_map.max(dim=1, keepdim=True)  # (B, 1)
-        attention_map_min, _ = attention_map.min(dim=1, keepdim=True)  # (B, 1)
-        attention_map = (attention_map - attention_map_min) / (attention_map_max - attention_map_min)  # (B, H * W)
-        attention_map = attention_map.view(batch_size, num_maps, H, W)  # (B, 1, H, W)
+        attention_map = attention_map.view(batch_size, self.K, -1)  # (B, K, H * W)
+        attention_map_max, _ = attention_map.max(dim=2, keepdim=True)  # (B, K, 1)
+        attention_map_min, _ = attention_map.min(dim=2, keepdim=True)  # (B, K, 1)
+        attention_map = (attention_map - attention_map_min) / (attention_map_max - attention_map_min)  # (B, K, H * W)
+        attention_map = attention_map.view(batch_size, num_maps, H, W)  # (B, K, H, W)
 
         return p, feature_matrix, attention_map
 
