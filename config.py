@@ -23,13 +23,13 @@ parser.add_option('--sz', '--input_size', dest='input_size', default=448, type='
                   help='desired input size (default: 448)')
 parser.add_option('--nc', '--num_classes', dest='num_classes', default=14, type='int',
                   help='number of classes (default: 200)')
-parser.add_option('--natt', '--num_attentions', dest='num_attentions', default=10, type='int',
+parser.add_option('--natt', '--num_attentions', dest='num_attentions', default=20, type='int',
                   help='desired number of attention maps (default: 32)')
 parser.add_option('--katt', '--K', dest='K', default=4, type='int',
                   help='The number of attention maps selected randomly in the training phase (default: 4)')
 parser.add_option('--dl', '--data_len', dest='data_len', default=None, type='int',
                   help='Length of the training and vaidation data (default: None which takes all)')
-parser.add_option('--mdl', '--model', dest='model', default='inception',
+parser.add_option('--mdl', '--model', dest='model', default='resnet152',
                   help='name of the model; inception, densenet121 or resnet152 (default: inception)')
 
 # loss
@@ -46,8 +46,7 @@ parser.add_option('--sd', '--save-dir', dest='save_dir', default='./save',
 parser.add_option('--lm', '--load_model', dest='load_model', default=False,
                   help='load checkpoint model (default: False)')
 parser.add_option('--lp', '--load_model_path', dest='load_model_path',
-                  default='/home/cougarnet.uh.edu/amobiny/Desktop/hide_and_seek/'
-                          'save/20190916_142925/models/014.ckpt',
+                  default='/home/cougarnet.uh.edu/amobiny/Desktop/20190928_180820/models/75820.ckpt',
                   help='path to load a .ckpt model')
 
 (options, args) = parser.parse_args()

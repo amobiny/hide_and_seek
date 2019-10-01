@@ -14,9 +14,7 @@ import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 from models import *
 from config import options
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import cv2
+from utils.other_utils import visualize_attention
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
 
@@ -45,33 +43,6 @@ def accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(100. / batch_size).cpu().numpy())
 
     return np.array(res)
-
-
-def visualize_attention(img, bb_coord, att_map, img_save_path=None):
-
-    # prepare the bounding box
-    width = bb_coord[3] - bb_coord[2]
-    height = bb_coord[1] - bb_coord[0]
-    rect = patches.Rectangle((bb_coord[2], bb_coord[0]), width, height,
-                             linewidth=1.5, edgecolor='r', facecolor='none')
-
-    # prepare the heat-map
-    att_map = np.minimum(np.maximum(att_map, 0), 1)
-    heatmap = cv2.applyColorMap(np.uint8(255 * np.squeeze(att_map)), cv2.COLORMAP_JET)
-    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-
-    # plot the figures
-    fig, axes = plt.subplots(nrows=1, ncols=2)
-    ax = axes[0]
-    ax.imshow(np.transpose(img, [1, 2, 0]), cmap='gray')
-    ax.imshow(heatmap, alpha=0.4)
-    ax.axis('off')
-
-    ax = axes[1]
-    ax.imshow(np.transpose(img, [1, 2, 0]), cmap='gray')
-    ax.add_patch(rect)
-    ax.axis('off')
-    plt.savefig(img_save_path)
 
 
 def validate(**kwargs):

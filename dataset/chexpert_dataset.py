@@ -81,7 +81,8 @@ class CheXpertDataSet(Dataset):
             img = transforms.ToTensor()(img)
             img = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])(img)
 
-        return img, target
+        out_name = image_name.split('/')[-3] + '_' + image_name.split('/')[-2] + '_' + image_name.split('/')[-1].split('.')[0]
+        return img, target, out_name
 
         # image_name = self.image_names[index]
         # image = Image.open(image_name).convert('RGB')

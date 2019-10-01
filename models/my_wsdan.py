@@ -107,7 +107,7 @@ class WSDAN_v2(nn.Module):
 
         # Normalize Attention Map
         num_maps = attention_map.size(1)
-        attention_map = attention_map.view(batch_size, self.K, -1)  # (B, K, H * W)
+        attention_map = attention_map.view(batch_size, num_maps, -1)  # (B, K, H * W)
         attention_map_max, _ = attention_map.max(dim=2, keepdim=True)  # (B, K, 1)
         attention_map_min, _ = attention_map.min(dim=2, keepdim=True)  # (B, K, 1)
         attention_map = (attention_map - attention_map_min) / (attention_map_max - attention_map_min)  # (B, K, H * W)

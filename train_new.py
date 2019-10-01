@@ -70,7 +70,7 @@ def train(**kwargs):
         log_string('**' * 25)
         log_string('Training Epoch %03d, Learning Rate %g' % (epoch + 1, optimizer.param_groups[0]['lr']))
         net.train()
-        for i, (X, y) in enumerate(data_loader):
+        for i, (X, y, _) in enumerate(data_loader):
             global_step += 1
 
             # obtain data for training
@@ -280,6 +280,7 @@ def train(**kwargs):
                 for key in state_dict.keys():
                     state_dict[key] = state_dict[key].cpu()
 
+                log_string('Saving the model at: {}.ckpt'.format(os.path.join(model_dir, global_step)))
                 torch.save({
                     'epoch': epoch,
                     'global_step': global_step,
@@ -318,7 +319,7 @@ def validate(**kwargs):
     # begin validation
     net.eval()
     with torch.no_grad():
-        for i, (X, y) in enumerate(data_loader):
+        for i, (X, y, _) in enumerate(data_loader):
 
             # obtain data
             X = X.to(torch.device("cuda"))
@@ -489,6 +490,7 @@ if __name__ == '__main__':
     # bkp of train procedure
     os.system('cp {}/train_new.py {}'.format(BASE_DIR, save_dir))
     os.system('cp {}/dataset/chexpert_dataset.py {}'.format(BASE_DIR, save_dir))
+    os.system('cp {}/config.py {}'.format(BASE_DIR, save_dir))
 
     ##################################
     # Use cuda
