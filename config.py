@@ -12,10 +12,11 @@ parser.add_option('-j', '--workers', dest='workers', default=1, type='int',
                   help='number of data loading workers (default: 16)')
 parser.add_option('-e', '--epochs', dest='epochs', default=300, type='int',
                   help='number of epochs (default: 80)')
-parser.add_option('-b', '--batch-size', dest='batch_size', default=8, type='int',
+parser.add_option('-b', '--batch-size', dest='batch_size', default=2, type='int',
                   help='batch size (default: 16)')
 
 # data and model
+parser.add_option('--dn', '--data_name', dest='data_name', default='CUB', help='CUB or chexpert')
 parser.add_option('--dd', '--data_dir', dest='data_dir',
                   default='/home/cougarnet.uh.edu/amobiny/Desktop/CheXpert-v1.0-small',
                   help='path to the data directory')
@@ -27,7 +28,7 @@ parser.add_option('--natt', '--num_attentions', dest='num_attentions', default=2
                   help='desired number of attention maps (default: 32)')
 parser.add_option('--katt', '--K', dest='K', default=4, type='int',
                   help='The number of attention maps selected randomly in the training phase (default: 4)')
-parser.add_option('--dl', '--data_len', dest='data_len', default=None, type='int',
+parser.add_option('--dl', '--data_len', dest='data_len', default=200, type='int',
                   help='Length of the training and vaidation data (default: None which takes all)')
 parser.add_option('--mdl', '--model', dest='model', default='resnet152',
                   help='name of the model; inception, densenet121 or resnet152 (default: inception)')
@@ -46,7 +47,7 @@ parser.add_option('--sd', '--save-dir', dest='save_dir', default='./save',
 parser.add_option('--lm', '--load_model', dest='load_model', default=False,
                   help='load checkpoint model (default: False)')
 parser.add_option('--lp', '--load_model_path', dest='load_model_path',
-                  default='/home/cougarnet.uh.edu/amobiny/Desktop/20190928_180820/models/75820.ckpt',
+                  default='/home/cougarnet.uh.edu/amobiny/Desktop/hide_and_seek/save/20191002_141933/models/289.ckpt',
                   help='path to load a .ckpt model')
 
 (options, args) = parser.parse_args()

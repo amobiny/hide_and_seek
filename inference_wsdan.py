@@ -68,8 +68,7 @@ def validate(**kwargs):
     start_time = time.time()
     net.eval()
     with torch.no_grad():
-        for i, (X, y) in enumerate(data_loader):
-            batch_start = time.time()
+        for i, (X, y, _) in enumerate(data_loader):
 
             # obtain data
             X = X.to(torch.device("cuda"))
@@ -94,8 +93,7 @@ def validate(**kwargs):
                 width_max = nonzero_indices[:, 1].max()
 
                 # visualize the attention map
-                box_coords = [height_min.cpu().numpy(), height_max.cpu().numpy(),
-                              width_min.cpu().numpy(), width_max.cpu().numpy()]
+                box_coords = torch.FloatTensor([height_min, height_max, width_min, width_max])
                 visualize_attention(X[batch_index].clone().cpu().numpy(),
                                     box_coords, upsampled_attention_map[batch_index].clone().cpu().numpy(),
                                     img_save_path=os.path.join(viz_dir, str(i) + '_' + str(batch_index) + '.png'))
@@ -165,11 +163,11 @@ if __name__ == '__main__':
 
     if options.data_name == 'CUB':
         from dataset.dataset_CUB import CUB as data
-
         data_dir = '/home/cougarnet.uh.edu/amobiny/Desktop/NTS_network/CUB_200_2011'
+        num_classes = 200
     elif options.data_name == 'cheXpert':
         from dataset.chexpert_dataset import CheXpertDataSet as data
-
+        num_classes = 2
         data_dir = '/home/cougarnet.uh.edu/amobiny/Desktop/CheXpert-v1.0-small'
     else:
         raise NameError('Dataset not available!')
@@ -191,7 +189,6 @@ if __name__ == '__main__':
     # Initialize model
     ##################################
     image_size = (options.input_size, options.input_size)
-    num_classes = options.num_classes
     num_attentions = options.num_attentions
 
     feature_net = inception_v3(pretrained=True)

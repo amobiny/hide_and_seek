@@ -104,6 +104,7 @@ class WSDAN_v2(nn.Module):
         else:
             # Object Localization Am = mean(sum(Ak))
             attention_map = torch.mean(attention_maps, dim=1, keepdim=True)  # (B, K=1, H, W)
+            # attention_map = attention_maps
 
         # Normalize Attention Map
         num_maps = attention_map.size(1)

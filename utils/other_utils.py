@@ -70,8 +70,8 @@ def visualize_attention(img, bb_coord, att_map, title='', scan_name='', img_save
     # plot the figures
     fig, axes = plt.subplots(nrows=1, ncols=2)
     ax = axes[0]
-    ax.imshow(np.transpose(img, [1, 2, 0]), cmap='gray')
-    ax.imshow(heatmap, alpha=0.4)
+    ax.imshow(np.transpose(img, [1, 2, 0]), cmap='gray', alpha=0.1)
+    ax.imshow(heatmap, alpha=0.6)
     ax.axis('off')
     ax.set_title(title)
     ax.set_xlabel(scan_name)

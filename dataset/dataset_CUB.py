@@ -7,7 +7,7 @@ import imageio
 
 
 class CUB:
-    def __init__(self, root, input_size=(448, 448), is_train=True, data_len=None):
+    def __init__(self, root, input_size=(448, 448), target_label=None, is_train=True, data_len=None):
         self.root = root
         self.is_train = is_train
         self.input_size = input_size
@@ -55,8 +55,8 @@ class CUB:
             img = transforms.CenterCrop(self.input_size)(img)
             img = transforms.ToTensor()(img)
             img = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])(img)
-
-        return img, target
+        empty =[]
+        return img, target, empty
 
     def __len__(self):
         if self.is_train:

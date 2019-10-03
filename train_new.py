@@ -25,8 +25,8 @@ from dataset.chexpert_dataset import CheXpertDataSet as data
 
 conditions = ['No Find', 'Enlgd Card.', 'Crdmgly', 'Opcty', 'Lsn', 'Edma', 'Cnsldton',
               'Pnumn', 'Atlctss', 'Pnmthrx', 'Plu. Eff.', 'Plu. Othr', 'Frctr', 'S. Dev.']
-# target_conditions = [3, 13]
-target_conditions = list(range(14))
+target_conditions = [2, 5, 6, 8, 10]
+# target_conditions = list(range(14))
 
 
 def log_string(out_str):
@@ -191,28 +191,28 @@ def train(**kwargs):
             ##################################
             # Attention Dropping
             ##################################
-            with torch.no_grad():
-                drop_mask = F.interpolate(attention_map, size=(X.size(2), X.size(3)), mode='bilinear',
-                                          align_corners=True) <= theta_d
-                drop_images = drop_mask.unsqueeze(2).float() * X.unsqueeze(1)
-                drop_images_reshaped = drop_images.view(-1, 3, X.size(2), X.size(3))
-
-            # drop images forward
-            y_pred, _, _ = net(drop_images_reshaped)
-            y_pred = y_pred.view(X.shape[0], drop_images.shape[1], num_classes)
-            y_pred = torch.mean(y_pred, dim=1)
-
-            # loss
-            batch_loss = loss(y_pred, y.float())
-            epoch_loss[2] += batch_loss.item()
-
-            # backward
-            optimizer.zero_grad()
-            batch_loss.backward()
-            optimizer.step()
-
-            with torch.no_grad():
-                epoch_acc[2] += compute_accuracy(y_pred, y)
+            # with torch.no_grad():
+            #     drop_mask = F.interpolate(attention_map, size=(X.size(2), X.size(3)), mode='bilinear',
+            #                               align_corners=True) <= theta_d
+            #     drop_images = drop_mask.unsqueeze(2).float() * X.unsqueeze(1)
+            #     drop_images_reshaped = drop_images.view(-1, 3, X.size(2), X.size(3))
+            #
+            # # drop images forward
+            # y_pred, _, _ = net(drop_images_reshaped)
+            # y_pred = y_pred.view(X.shape[0], drop_images.shape[1], num_classes)
+            # y_pred = torch.mean(y_pred, dim=1)
+            #
+            # # loss
+            # batch_loss = loss(y_pred, y.float())
+            # epoch_loss[2] += batch_loss.item()
+            #
+            # # backward
+            # optimizer.zero_grad()
+            # batch_loss.backward()
+            # optimizer.step()
+            #
+            # with torch.no_grad():
+            #     epoch_acc[2] += compute_accuracy(y_pred, y)
 
             # end of this batch
             batches += 1
@@ -243,7 +243,7 @@ def train(**kwargs):
                     raw_acc_ii = epoch_acc[0, ii] / batches
                     crop_acc_ii = epoch_acc[1, ii] / batches
                     drop_acc_ii = epoch_acc[2, ii] / batches
-                    str_print += '{0:<13} {1:<7.2f} {2:<7.2f} {3:<7.2f}'.format(conditions[ii],
+                    str_print += '{0:<13} {1:<7.2f} {2:<7.2f} {3:<7.2f}'.format(conditions[target_conditions[ii]],
                                                                                 raw_acc_ii,
                                                                                 crop_acc_ii,
                                                                                 drop_acc_ii) + '\n'
@@ -271,16 +271,16 @@ def train(**kwargs):
                 for ii in range(len(types_)):
                     metrics_ = eval_metrics[ii]
                     for k, v in metrics_['aucs'].items():
-                        val_logger.scalar_summary('{}_{}_auc'.format(conditions[k], types_[ii]), v, global_step)
+                        val_logger.scalar_summary('{}_{}_auc'.format(conditions[target_conditions[k]], types_[ii]), v, global_step)
                     for k, v in enumerate(metrics_['acc']):
-                        val_logger.scalar_summary('{}_{}_accuracy'.format(conditions[k], types_[ii]), v, global_step)
+                        val_logger.scalar_summary('{}_{}_accuracy'.format(conditions[target_conditions[k]], types_[ii]), v, global_step)
 
                 # save checkpoint model
                 state_dict = net.module.state_dict()
                 for key in state_dict.keys():
                     state_dict[key] = state_dict[key].cpu()
 
-                log_string('Saving the model at: {}.ckpt'.format(os.path.join(model_dir, global_step)))
+                log_string('Saving the model at: {}.ckpt'.format(os.path.join(model_dir, str(global_step))))
                 torch.save({
                     'epoch': epoch,
                     'global_step': global_step,
@@ -389,7 +389,7 @@ def validate(**kwargs):
         crop_auc_ii = round(crop_eval_metrics['aucs'][ii], 2)
         comb_acc_ii = round(comb_eval_metrics['acc'][ii], 2)
         comb_auc_ii = round(comb_eval_metrics['aucs'][ii], 2)
-        str_print += '{0:<13} {1:<6}, {2:<7}   {3:<6}, {4:<7}   {5:<6}   {6:<7}'.format(conditions[ii],
+        str_print += '{0:<13} {1:<6}, {2:<7}   {3:<6}, {4:<7}   {5:<6}   {6:<7}'.format(conditions[target_conditions[ii]],
                                                                                         str(raw_acc_ii),
                                                                                         str(raw_auc_ii)
                                                                                         , str(crop_acc_ii),

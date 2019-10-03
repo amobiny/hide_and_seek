@@ -23,7 +23,7 @@ TOP_K = [1]
 
 conditions = ['No Find', 'Enlgd Card.', 'Crdmgly', 'Opcty', 'Lsn', 'Edma', 'Cnsldton',
               'Pnumn', 'Atlctss', 'Pnmthrx', 'Plu. Eff.', 'Plu. Othr', 'Frctr', 'S. Dev.']
-target_conditions = [13]
+target_conditions = [3]
 
 
 def log_string(out_str):
@@ -80,7 +80,7 @@ def train(**kwargs):
     start_time = time.time()
     log_string('Training Epoch %03d, Learning Rate %g' % (epoch + 1, optimizer.param_groups[0]['lr']))
     net.train()
-    for i, (X, y) in enumerate(data_loader):
+    for i, (X, y, _) in enumerate(data_loader):
         batch_start = time.time()
 
         # obtain data for training
@@ -252,7 +252,7 @@ def validate(**kwargs):
     start_time = time.time()
     net.eval()
     with torch.no_grad():
-        for i, (X, y) in enumerate(data_loader):
+        for i, (X, y, _) in enumerate(data_loader):
 
             # obtain data
             X = X.to(torch.device("cuda"))
@@ -337,11 +337,11 @@ if __name__ == '__main__':
 
     if options.data_name == 'CUB':
         from dataset.dataset_CUB import CUB as data
-
+        num_classes = 200
         data_dir = '/home/cougarnet.uh.edu/amobiny/Desktop/NTS_network/CUB_200_2011'
-    elif options.data_name == 'cheXpert':
+    elif options.data_name == 'chexpert':
         from dataset.chexpert_dataset import CheXpertDataSet as data
-
+        num_classes = 2
         data_dir = '/home/cougarnet.uh.edu/amobiny/Desktop/CheXpert-v1.0-small'
     else:
         raise NameError('Dataset not available!')
@@ -350,7 +350,6 @@ if __name__ == '__main__':
     # Initialize model
     ##################################
     image_size = (options.input_size, options.input_size)
-    num_classes = options.num_classes
     num_attentions = options.num_attentions
     start_epoch = 0
 
@@ -399,6 +398,7 @@ if __name__ == '__main__':
         os.makedirs(model_dir)
 
     # bkp of model def
+    os.system('cp {}/config.py {}'.format(BASE_DIR, save_dir))
     os.system('cp {}/models/wsdan.py {}'.format(BASE_DIR, save_dir))
     # bkp of train procedure
     os.system('cp {}/train_wsdan.py {}'.format(BASE_DIR, save_dir))
@@ -454,7 +454,7 @@ if __name__ == '__main__':
               feature_center=feature_center,
               loss=loss,
               optimizer=optimizer,
-              save_freq=options.save_freq,
+              save_freq=1,
               model_dir=model_dir,
               logs_dir=logs_dir,
               verbose=options.verbose)
